@@ -4,15 +4,25 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const PURPLE = "#6A178C";
 
-type Template = { name: string; count: number };
-type WaNumber = { phone_number_id: string; name: string; phone_number: string | null; is_default: boolean; status: string; is_pdf_number: boolean };
-
-type ConversationLite = {
-  id: string;
-  phone: string;
-  lead_name: string | null;
+type Component = {
+  type: "HEADER" | "BODY" | "FOOTER" | "BUTTONS";
+  format?: "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT" | "LOCATION";
+  text?: string;
+  example?: { header_text?: string[]; body_text?: string[][]; header_handle?: string[] };
+  buttons?: { type: string; text?: string; url?: string }[];
+};
+type MetaTemplate = {
+  name: string;
+  language: string;
+  status: string;
+  category: string;
+  components: Component[];
+  available_from: { phone_number_id: string; name: string }[];
+  usage_count: number;
 };
 
+type WaNumber = { phone_number_id: string; name: string; phone_number: string | null; is_default: boolean; status: string; is_pdf_number: boolean; business_account_id?: string | null };
+type ConversationLite = { id: string; phone: string; lead_name: string | null };
 type Mode = "single" | "bulk";
 
 type BulkResult = {
@@ -38,10 +48,10 @@ export default function TemplatesModal({
   onSent?: () => void;
 }) {
   const [mode, setMode] = useState<Mode>("single");
-  const [templates, setTemplates] = useState<Template[]>([]);
+  const [templates, setTemplates] = useState<MetaTemplate[]>([]);
+  const [templateErrors, setTemplateErrors] = useState<string[]>([]);
   const [numbers, setNumbers] = useState<WaNumber[]>([]);
-  const [selectedTpl, setSelectedTpl] = useState<string>("");
-  const [language, setLanguage] = useState("es");
+  const [selected, setSelected] = useState<MetaTemplate | null>(null);
   const [fromNumberId, setFromNumberId] = useState<string>("");
   const [searchTpl, setSearchTpl] = useState("");
   const [bulkInput, setBulkInput] = useState("");
@@ -49,7 +59,11 @@ export default function TemplatesModal({
   const [singleResult, setSingleResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
-  const phonesTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Variables fill state
+  const [bodyVars, setBodyVars] = useState<string[]>([]);
+  const [headerVars, setHeaderVars] = useState<string[]>([]);
+  const [headerMediaUrl, setHeaderMediaUrl] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -57,11 +71,12 @@ export default function TemplatesModal({
     setBulkResult(null);
     setLoadErr(null);
     Promise.all([
-      fetch("/api/admin/inbox-v2/templates", { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`templates ${r.status}`))),
+      fetch("/api/admin/inbox-v2/meta-templates", { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`meta-templates ${r.status}`))),
       fetch("/api/admin/inbox-v2/whatsapp-numbers", { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`numbers ${r.status}`))),
     ])
       .then(([t, n]) => {
         setTemplates(t.templates ?? []);
+        setTemplateErrors(t.errors ?? []);
         const nums: WaNumber[] = (n.numbers ?? []).filter((x: WaNumber) => x.status === "active" && !x.is_pdf_number);
         setNumbers(nums);
         if (!fromNumberId) {
@@ -73,18 +88,75 @@ export default function TemplatesModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultFromNumberId]);
 
+  // Filtra por número origen (solo plantillas disponibles desde el WABA seleccionado)
   const filteredTpls = useMemo(() => {
     const q = searchTpl.trim().toLowerCase();
-    if (!q) return templates;
-    return templates.filter((t) => t.name.toLowerCase().includes(q));
-  }, [templates, searchTpl]);
+    return templates
+      .filter((t) => t.status === "APPROVED")
+      .filter((t) => !fromNumberId || t.available_from.some((x) => x.phone_number_id === fromNumberId))
+      .filter((t) => !q || t.name.toLowerCase().includes(q) || (componentText(t, "BODY") ?? "").toLowerCase().includes(q));
+  }, [templates, searchTpl, fromNumberId]);
+
+  // Cuando se elige una plantilla, reinicia los inputs de variables
+  useEffect(() => {
+    if (!selected) {
+      setBodyVars([]);
+      setHeaderVars([]);
+      setHeaderMediaUrl("");
+      return;
+    }
+    const body = componentText(selected, "BODY") ?? "";
+    const header = componentText(selected, "HEADER") ?? "";
+    setBodyVars(Array(countVars(body)).fill(""));
+    setHeaderVars(Array(countVars(header)).fill(""));
+    setHeaderMediaUrl("");
+  }, [selected?.name, selected?.language]);
 
   const parsedPhones = useMemo(() => parsePhones(bulkInput), [bulkInput]);
 
   if (!open) return null;
 
+  const headerComp = selected?.components.find((c) => c.type === "HEADER");
+  const bodyComp = selected?.components.find((c) => c.type === "BODY");
+  const footerComp = selected?.components.find((c) => c.type === "FOOTER");
+  const buttonsComp = selected?.components.find((c) => c.type === "BUTTONS");
+  const needsMediaHeader = headerComp && ["IMAGE", "VIDEO", "DOCUMENT"].includes(headerComp.format ?? "");
+
+  function buildComponents(): any[] {
+    if (!selected) return [];
+    const out: any[] = [];
+    if (headerComp) {
+      if (needsMediaHeader) {
+        if (!headerMediaUrl.trim()) return out; // se filtra fuera (botón disabled)
+        const fmt = (headerComp.format ?? "").toLowerCase();
+        const param: any = { type: fmt };
+        if (fmt === "image") param.image = { link: headerMediaUrl.trim() };
+        else if (fmt === "video") param.video = { link: headerMediaUrl.trim() };
+        else if (fmt === "document") param.document = { link: headerMediaUrl.trim(), filename: headerMediaUrl.split("/").slice(-1)[0] || "doc.pdf" };
+        out.push({ type: "header", parameters: [param] });
+      } else if (headerComp.format === "TEXT" && headerVars.length > 0) {
+        out.push({ type: "header", parameters: headerVars.map((v) => ({ type: "text", text: v })) });
+      }
+    }
+    if (bodyComp && bodyVars.length > 0) {
+      out.push({ type: "body", parameters: bodyVars.map((v) => ({ type: "text", text: v })) });
+    }
+    return out;
+  }
+
+  function readyToSend(): { ok: boolean; reason?: string } {
+    if (!selected) return { ok: false, reason: "Selecciona una plantilla" };
+    if (!fromNumberId) return { ok: false, reason: "Elige número de origen" };
+    if (needsMediaHeader && !headerMediaUrl.trim()) return { ok: false, reason: "Falta URL del media del header" };
+    if (headerVars.some((v) => !v.trim())) return { ok: false, reason: "Faltan variables del header" };
+    if (bodyVars.some((v) => !v.trim())) return { ok: false, reason: "Faltan variables del body" };
+    return { ok: true };
+  }
+
   async function sendSingle() {
-    if (!conversation || !selectedTpl) return;
+    if (!conversation || !selected) return;
+    const ready = readyToSend();
+    if (!ready.ok) { setSingleResult({ ok: false, msg: ready.reason ?? "no listo" }); return; }
     setSending(true);
     setSingleResult(null);
     try {
@@ -92,35 +164,26 @@ export default function TemplatesModal({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          template_name: selectedTpl,
-          language,
-          from_number: fromNumberId || undefined,
-          agent_name: "agente",
-        }),
+        body: JSON.stringify({ template_name: selected.name, language: selected.language, from_number: fromNumberId, components: buildComponents(), agent_name: "agente" }),
       });
       const j = await r.json().catch(() => ({}));
       if (r.ok) {
         setSingleResult({ ok: true, msg: `Enviado a ${conversation.lead_name?.trim() || conversation.phone} desde ${j.sent_from?.name ?? "?"}` });
         onSent?.();
       } else {
-        setSingleResult({ ok: false, msg: `${r.status} · ${j.error ?? "error"}${j.detail ? " · " + j.detail.slice(0, 160) : ""}` });
+        setSingleResult({ ok: false, msg: `${r.status} · ${j.error ?? "error"}${j.detail ? " · " + j.detail.slice(0, 200) : ""}` });
       }
     } catch (e: any) {
       setSingleResult({ ok: false, msg: String(e.message ?? e) });
-    } finally {
-      setSending(false);
-    }
+    } finally { setSending(false); }
   }
 
   async function sendBulk() {
-    if (!selectedTpl) return;
-    if (parsedPhones.length === 0) return;
-    if (parsedPhones.length > 500) {
-      setBulkResult({ ok: false, sent_from: { name: "", phone_number_id: "" }, total: parsedPhones.length, success: 0, failed: parsedPhones.length, results: [] });
-      return;
-    }
-    if (!confirm(`Vas a enviar la plantilla "${selectedTpl}" a ${parsedPhones.length} contactos desde "${numbers.find((n) => n.phone_number_id === fromNumberId)?.name ?? "?"}". ¿Continuar?`)) return;
+    if (!selected) return;
+    const ready = readyToSend();
+    if (!ready.ok) { setBulkResult({ ok: false, sent_from: { name: "", phone_number_id: "" }, total: parsedPhones.length, success: 0, failed: parsedPhones.length, results: [{ phone: "—", ok: false, error: ready.reason }] }); return; }
+    if (parsedPhones.length === 0 || parsedPhones.length > 500) return;
+    if (!confirm(`Enviar plantilla "${selected.name}" a ${parsedPhones.length} contactos desde "${numbers.find((n) => n.phone_number_id === fromNumberId)?.name ?? "?"}". ¿Continuar?`)) return;
     setSending(true);
     setBulkResult(null);
     try {
@@ -128,173 +191,205 @@ export default function TemplatesModal({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          template_name: selectedTpl,
-          language,
-          from_number: fromNumberId,
-          phones: parsedPhones,
-          agent_name: "agente",
-        }),
+        body: JSON.stringify({ template_name: selected.name, language: selected.language, from_number: fromNumberId, components: buildComponents(), phones: parsedPhones, agent_name: "agente" }),
       });
       const j = await r.json();
       setBulkResult(j as BulkResult);
       if (j.ok) onSent?.();
     } catch (e: any) {
       setBulkResult({ ok: false, sent_from: { name: "", phone_number_id: fromNumberId }, total: parsedPhones.length, success: 0, failed: parsedPhones.length, results: [{ phone: "—", ok: false, error: String(e.message ?? e) }] });
-    } finally {
-      setSending(false);
-    }
+    } finally { setSending(false); }
   }
 
   return (
     <div onClick={onClose} style={overlayStyle}>
       <div onClick={(e) => e.stopPropagation()} style={modalStyle}>
-        {/* Header */}
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, padding: "16px 20px", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a2e" }}>📋 Plantillas Meta WhatsApp</h2>
-          <span style={{ fontSize: 12, color: "#888" }}>{templates.length} plantillas · {numbers.length} números disponibles</span>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a2e" }}>📋 Plantillas WhatsApp</h2>
+          <span style={{ fontSize: 12, color: "#888" }}>{templates.filter((t) => t.status === "APPROVED").length} aprobadas · {numbers.length} números</span>
           <button onClick={onClose} style={{ marginLeft: "auto", border: "none", background: "transparent", fontSize: 22, cursor: "pointer", color: "#888" }}>×</button>
         </div>
 
-        {/* Tabs mode */}
         <div style={{ display: "flex", gap: 4, padding: "10px 20px 0", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
           <TabBtn cur={mode} v="single" set={setMode} label={conversation ? `Esta conversación · ${conversation.lead_name?.trim() || conversation.phone}` : "Una conversación"} disabled={!conversation} />
           <TabBtn cur={mode} v="bulk" set={setMode} label="📣 Envío masivo (bulk)" />
         </div>
 
+        {/* Número origen + idioma + errores */}
+        <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 20px", borderBottom: "1px solid rgba(0,0,0,0.04)", background: "#fafafa", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, color: "#888", fontWeight: 700 }}>ENVIAR DESDE:</span>
+          <select value={fromNumberId} onChange={(e) => { setFromNumberId(e.target.value); setSelected(null); }} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(0,0,0,0.1)", fontSize: 12.5, background: "#fff", minWidth: 280 }}>
+            {numbers.length === 0 && <option value="">(sin números)</option>}
+            {numbers.map((n) => (
+              <option key={n.phone_number_id} value={n.phone_number_id}>
+                {n.name?.trim()}{n.phone_number ? ` · ${n.phone_number}` : ""}{n.is_default ? " · default" : ""}
+              </option>
+            ))}
+          </select>
+          {templateErrors.length > 0 && (
+            <span title={templateErrors.join("\n")} style={{ fontSize: 11, color: "#dc2626", fontWeight: 600, cursor: "help" }}>
+              ⚠️ {templateErrors.length} WABA{templateErrors.length === 1 ? "" : "s"} con token expirado
+            </span>
+          )}
+        </div>
+
         {loadErr && <div style={errBox}>{loadErr}</div>}
 
-        {/* Body 2 columns: left = template chooser, right = send controls + result */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, flex: 1, minHeight: 0 }}>
-          {/* LEFT — pick template */}
-          <div style={{ borderRight: "1px solid rgba(0,0,0,0.06)", padding: 16, overflowY: "auto", minHeight: 0 }}>
-            <div style={{ fontSize: 11, color: "#888", fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>1. ELEGIR PLANTILLA</div>
-            <input
-              type="text"
-              value={searchTpl}
-              onChange={(e) => setSearchTpl(e.target.value)}
-              placeholder="Buscar plantilla…"
-              style={{ width: "100%", padding: "8px 12px", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 8, fontSize: 13, marginBottom: 10, boxSizing: "border-box" }}
-            />
+        {/* Body 3 columns: left = list, middle = preview, right = actions */}
+        <div style={{ display: "grid", gridTemplateColumns: "320px 1fr 360px", gap: 0, flex: 1, minHeight: 0 }}>
+          {/* LEFT — list */}
+          <div style={{ borderRight: "1px solid rgba(0,0,0,0.06)", padding: 14, overflowY: "auto", minHeight: 0 }}>
+            <div style={{ fontSize: 11, color: "#888", fontWeight: 700, marginBottom: 8 }}>1. ELEGIR PLANTILLA</div>
+            <input type="text" value={searchTpl} onChange={(e) => setSearchTpl(e.target.value)} placeholder="Buscar nombre o texto…" style={{ width: "100%", padding: "7px 10px", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 8, fontSize: 12, marginBottom: 10, boxSizing: "border-box" }} />
+            <div style={{ fontSize: 10, color: "#aaa", marginBottom: 8 }}>{filteredTpls.length} plantilla{filteredTpls.length === 1 ? "" : "s"} disponibles para este número</div>
             <div style={{ display: "grid", gap: 4 }}>
               {filteredTpls.length === 0 && <div style={{ fontSize: 12, color: "#aaa", padding: 12 }}>Sin resultados.</div>}
               {filteredTpls.map((t) => (
-                <button
-                  key={t.name}
-                  onClick={() => setSelectedTpl(t.name)}
-                  style={{
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "10px 12px",
-                    fontSize: 12.5,
-                    background: selectedTpl === t.name ? "rgba(106,23,140,0.08)" : "#fff",
-                    border: `1px solid ${selectedTpl === t.name ? PURPLE : "rgba(0,0,0,0.06)"}`,
-                    borderRadius: 8,
-                    cursor: "pointer",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <span style={{ fontFamily: "ui-monospace, monospace", color: "#1a1a2e", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</span>
-                  <span style={{ fontSize: 10, color: "#888", marginLeft: 8, flexShrink: 0 }}>×{t.count}</span>
+                <button key={`${t.name}-${t.language}`} onClick={() => setSelected(t)} style={{
+                  width: "100%", textAlign: "left", padding: "9px 11px", fontSize: 12, background: selected?.name === t.name && selected?.language === t.language ? "rgba(106,23,140,0.08)" : "#fff",
+                  border: `1px solid ${selected?.name === t.name && selected?.language === t.language ? PURPLE : "rgba(0,0,0,0.06)"}`,
+                  borderRadius: 8, cursor: "pointer",
+                }}>
+                  <div style={{ fontFamily: "ui-monospace, monospace", color: "#1a1a2e", fontWeight: 600 }}>{t.name}</div>
+                  <div style={{ fontSize: 10, color: "#888", marginTop: 2, display: "flex", justifyContent: "space-between", gap: 6 }}>
+                    <span>{t.category?.toLowerCase() ?? "?"} · {t.language}</span>
+                    {t.usage_count > 0 && <span style={{ color: PURPLE }}>×{t.usage_count} uso</span>}
+                  </div>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* RIGHT — send controls + result */}
-          <div style={{ padding: 16, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
-            {/* Send from number */}
-            <div style={{ fontSize: 11, color: "#888", fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>2. ENVIAR DESDE</div>
-            <select
-              value={fromNumberId}
-              onChange={(e) => setFromNumberId(e.target.value)}
-              style={{ padding: "8px 12px", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 8, fontSize: 13, marginBottom: 12, background: "#fff" }}
-            >
-              {numbers.length === 0 && <option value="">(sin números cargados)</option>}
-              {numbers.map((n) => (
-                <option key={n.phone_number_id} value={n.phone_number_id}>
-                  {n.name?.trim()}{n.phone_number ? ` · ${n.phone_number}` : ""}{n.is_default ? " · default" : ""}
-                </option>
-              ))}
-            </select>
-
-            {/* Language */}
-            <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 14 }}>
-              <span style={{ fontSize: 11, color: "#888", fontWeight: 600 }}>Idioma:</span>
-              <select value={language} onChange={(e) => setLanguage(e.target.value)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid rgba(0,0,0,0.1)", fontSize: 12 }}>
-                <option value="es">es</option>
-                <option value="es_MX">es_MX</option>
-                <option value="es_ES">es_ES</option>
-                <option value="en">en</option>
-              </select>
-            </div>
-
-            {/* Per-mode actions */}
-            {mode === "single" && (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-                <div style={{ fontSize: 11, color: "#888", fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>3. ENVIAR</div>
-                {conversation ? (
-                  <div style={{ padding: 12, background: "rgba(106,23,140,0.04)", borderRadius: 8, marginBottom: 10, fontSize: 13 }}>
-                    Destinatario: <strong>{conversation.lead_name?.trim() || "(sin nombre)"}</strong>{" "}
-                    <span style={{ color: "#888" }}>· {conversation.phone}</span>
-                  </div>
-                ) : (
-                  <div style={{ padding: 12, background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 8, marginBottom: 10, fontSize: 12, color: "#92400e" }}>
-                    No hay conversación abierta. Cambia a la pestaña &ldquo;Envío masivo&rdquo;.
+          {/* MIDDLE — preview */}
+          <div style={{ padding: 14, borderRight: "1px solid rgba(0,0,0,0.06)", overflowY: "auto", minHeight: 0, background: "#FAFAFA" }}>
+            <div style={{ fontSize: 11, color: "#888", fontWeight: 700, marginBottom: 8 }}>2. PREVIEW</div>
+            {!selected ? (
+              <div style={{ padding: 20, textAlign: "center", color: "#aaa", fontSize: 12 }}>Elige una plantilla para verla.</div>
+            ) : (
+              <div style={{ background: "#fff", borderRadius: 14, border: "1px solid rgba(0,0,0,0.06)", overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
+                {headerComp && (
+                  <div style={{ borderBottom: "1px solid rgba(0,0,0,0.04)", padding: headerComp.format === "TEXT" ? "10px 14px" : 0, background: headerComp.format === "TEXT" ? "rgba(106,23,140,0.04)" : "transparent" }}>
+                    {headerComp.format === "TEXT" && (
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2e" }}>{renderWithVars(headerComp.text ?? "", headerVars)}</div>
+                    )}
+                    {headerComp.format === "IMAGE" && (
+                      <div style={{ height: 180, background: "linear-gradient(135deg,#f0e8ff,#e6d3f5)", display: "flex", alignItems: "center", justifyContent: "center", color: "#888", fontSize: 12 }}>
+                        {headerMediaUrl ? <img src={headerMediaUrl} alt="header" style={{ maxWidth: "100%", maxHeight: 180 }} /> : "🖼️ Header IMAGE — añade URL"}
+                      </div>
+                    )}
+                    {headerComp.format === "VIDEO" && (
+                      <div style={{ height: 180, background: "#000", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>🎬 Header VIDEO — añade URL</div>
+                    )}
+                    {headerComp.format === "DOCUMENT" && (
+                      <div style={{ height: 100, background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", color: "#666", fontSize: 12 }}>📄 Header DOCUMENT — añade URL</div>
+                    )}
                   </div>
                 )}
-                <button
-                  onClick={sendSingle}
-                  disabled={!conversation || !selectedTpl || sending}
-                  style={primaryBtn(!conversation || !selectedTpl || sending)}
-                >
-                  {sending ? "Enviando…" : `Enviar plantilla a ${conversation?.lead_name?.trim() || conversation?.phone || "lead"}`}
-                </button>
-                {singleResult && (
-                  <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: singleResult.ok ? "#ecfdf5" : "#fef2f2", color: singleResult.ok ? "#065f46" : "#991b1b", fontSize: 12, border: `1px solid ${singleResult.ok ? "#a7f3d0" : "#fecaca"}` }}>
-                    {singleResult.ok ? "✅ " : "❌ "}
-                    {singleResult.msg}
+                {bodyComp && (
+                  <div style={{ padding: "14px 16px", fontSize: 13, color: "#1a1a2e", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                    {renderWithVars(bodyComp.text ?? "", bodyVars)}
                   </div>
                 )}
+                {footerComp && (
+                  <div style={{ padding: "8px 16px", fontSize: 11, color: "#888", borderTop: "1px solid rgba(0,0,0,0.04)", background: "rgba(0,0,0,0.01)" }}>
+                    {footerComp.text}
+                  </div>
+                )}
+                {buttonsComp && buttonsComp.buttons && buttonsComp.buttons.length > 0 && (
+                  <div style={{ display: "grid", gap: 1, background: "rgba(0,0,0,0.04)" }}>
+                    {buttonsComp.buttons.map((b, i) => (
+                      <div key={i} style={{ padding: "10px 14px", background: "#fff", textAlign: "center", color: "#1e90ff", fontSize: 13, fontWeight: 600 }}>
+                        {b.type === "URL" ? "🔗" : b.type === "PHONE_NUMBER" ? "📞" : "▶"} {b.text}
+                        {b.url && <div style={{ fontSize: 10, color: "#aaa", marginTop: 2 }}>{b.url}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ padding: "6px 12px", fontSize: 10, color: "#bbb", background: "#fafafa", display: "flex", justifyContent: "space-between" }}>
+                  <span>📋 {selected.name}</span>
+                  <span>{selected.language} · {selected.category?.toLowerCase()}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT — actions */}
+          <div style={{ padding: 14, display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
+            <div style={{ fontSize: 11, color: "#888", fontWeight: 700, marginBottom: 8 }}>3. RELLENAR Y ENVIAR</div>
+
+            {!selected && <div style={{ fontSize: 12, color: "#aaa", padding: 10 }}>Selecciona una plantilla.</div>}
+
+            {selected && needsMediaHeader && (
+              <div style={{ marginBottom: 12 }}>
+                <label style={lblStyle}>Header {headerComp?.format}</label>
+                <input type="url" value={headerMediaUrl} onChange={(e) => setHeaderMediaUrl(e.target.value)} placeholder="https://… URL pública del media" style={inputStyle} />
+                <div style={{ fontSize: 10, color: "#aaa", marginTop: 2 }}>Debe ser HTTPS pública. Meta descargará el media.</div>
               </div>
             )}
 
+            {selected && headerComp?.format === "TEXT" && headerVars.map((v, i) => (
+              <div key={`hv-${i}`} style={{ marginBottom: 8 }}>
+                <label style={lblStyle}>Header · variable {`{{${i + 1}}}`}</label>
+                <input type="text" value={v} onChange={(e) => { const nv = [...headerVars]; nv[i] = e.target.value; setHeaderVars(nv); }} placeholder={selected.components.find((c) => c.type === "HEADER")?.example?.header_text?.[i] || "valor"} style={inputStyle} />
+              </div>
+            ))}
+
+            {selected && bodyVars.map((v, i) => (
+              <div key={`bv-${i}`} style={{ marginBottom: 8 }}>
+                <label style={lblStyle}>Body · variable {`{{${i + 1}}}`}</label>
+                <input type="text" value={v} onChange={(e) => { const nv = [...bodyVars]; nv[i] = e.target.value; setBodyVars(nv); }} placeholder={selected.components.find((c) => c.type === "BODY")?.example?.body_text?.[0]?.[i] || "valor"} style={inputStyle} />
+              </div>
+            ))}
+
+            {selected && bodyVars.length === 0 && !needsMediaHeader && headerVars.length === 0 && (
+              <div style={{ fontSize: 11, color: "#888", padding: 8, background: "rgba(0,0,0,0.02)", borderRadius: 6, marginBottom: 10 }}>
+                Esta plantilla no requiere variables. Lista para enviar.
+              </div>
+            )}
+
+            {/* Per-mode action */}
+            {mode === "single" && (
+              <>
+                {!conversation ? (
+                  <div style={{ padding: 10, background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 8, fontSize: 11, color: "#92400e", marginBottom: 10 }}>
+                    No hay conversación abierta. Usa &ldquo;Envío masivo&rdquo;.
+                  </div>
+                ) : selected ? (
+                  <div style={{ padding: 10, background: "rgba(106,23,140,0.04)", borderRadius: 8, marginBottom: 10, fontSize: 12 }}>
+                    A: <strong>{conversation.lead_name?.trim() || "(sin nombre)"}</strong> <span style={{ color: "#888" }}>· {conversation.phone}</span>
+                  </div>
+                ) : null}
+                <button onClick={sendSingle} disabled={!conversation || !readyToSend().ok || sending} style={primaryBtn(!conversation || !readyToSend().ok || sending)}>
+                  {sending ? "Enviando…" : `Enviar plantilla`}
+                </button>
+                {!readyToSend().ok && selected && conversation && <div style={{ fontSize: 10, color: "#dc2626", marginTop: 4 }}>{readyToSend().reason}</div>}
+                {singleResult && <div style={{ marginTop: 10, padding: 9, borderRadius: 8, background: singleResult.ok ? "#ecfdf5" : "#fef2f2", color: singleResult.ok ? "#065f46" : "#991b1b", fontSize: 12, border: `1px solid ${singleResult.ok ? "#a7f3d0" : "#fecaca"}` }}>{singleResult.ok ? "✅ " : "❌ "}{singleResult.msg}</div>}
+              </>
+            )}
+
             {mode === "bulk" && (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-                <div style={{ fontSize: 11, color: "#888", fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>3. PEGAR TELÉFONOS (separados por comas, espacios o saltos de línea)</div>
-                <textarea
-                  ref={phonesTextareaRef}
-                  value={bulkInput}
-                  onChange={(e) => setBulkInput(e.target.value)}
-                  rows={6}
-                  placeholder="34XXXXXXXXX, 34XXXXXXXXX&#10;34XXXXXXXXX&#10;34XXXXXXXXX"
-                  style={{ width: "100%", padding: 10, fontSize: 12, fontFamily: "ui-monospace, monospace", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 8, resize: "vertical", boxSizing: "border-box", minHeight: 110 }}
-                />
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, marginBottom: 10, fontSize: 11 }}>
+              <>
+                <label style={lblStyle}>Teléfonos (comas, espacios o saltos de línea)</label>
+                <textarea value={bulkInput} onChange={(e) => setBulkInput(e.target.value)} rows={5} placeholder={"34XXXXXXXXX, 34XXXXXXXXX\n34611111111"} style={{ ...inputStyle, fontFamily: "ui-monospace, monospace", resize: "vertical", minHeight: 90 }} />
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4, marginBottom: 8, fontSize: 11 }}>
                   <span style={{ color: parsedPhones.length > 500 ? "#dc2626" : "#666" }}>
-                    {parsedPhones.length} teléfono{parsedPhones.length === 1 ? "" : "s"} válidos {parsedPhones.length > 500 && "(máx 500)"}
+                    {parsedPhones.length} válidos {parsedPhones.length > 500 && "(máx 500)"}
                   </span>
                   <button onClick={() => setBulkInput("")} style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", fontSize: 11 }}>Limpiar</button>
                 </div>
-                <button
-                  onClick={sendBulk}
-                  disabled={!selectedTpl || parsedPhones.length === 0 || parsedPhones.length > 500 || sending}
-                  style={primaryBtn(!selectedTpl || parsedPhones.length === 0 || parsedPhones.length > 500 || sending)}
-                >
+                <button onClick={sendBulk} disabled={!readyToSend().ok || parsedPhones.length === 0 || parsedPhones.length > 500 || sending} style={primaryBtn(!readyToSend().ok || parsedPhones.length === 0 || parsedPhones.length > 500 || sending)}>
                   {sending ? `Enviando a ${parsedPhones.length}…` : `📤 Enviar a ${parsedPhones.length} contacto${parsedPhones.length === 1 ? "" : "s"}`}
                 </button>
-
+                {!readyToSend().ok && selected && <div style={{ fontSize: 10, color: "#dc2626", marginTop: 4 }}>{readyToSend().reason}</div>}
                 {bulkResult && (
-                  <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: bulkResult.success === bulkResult.total ? "#ecfdf5" : bulkResult.success === 0 ? "#fef2f2" : "#fffbeb", border: `1px solid ${bulkResult.success === bulkResult.total ? "#a7f3d0" : bulkResult.success === 0 ? "#fecaca" : "#fde68a"}`, fontSize: 12 }}>
+                  <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: bulkResult.success === bulkResult.total ? "#ecfdf5" : bulkResult.success === 0 ? "#fef2f2" : "#fffbeb", border: `1px solid ${bulkResult.success === bulkResult.total ? "#a7f3d0" : bulkResult.success === 0 ? "#fecaca" : "#fde68a"}`, fontSize: 12 }}>
                     <div style={{ fontWeight: 700, marginBottom: 6 }}>
                       {bulkResult.success === bulkResult.total ? "✅" : "⚠️"} {bulkResult.success} / {bulkResult.total} enviados desde {bulkResult.sent_from?.name ?? "?"}
                     </div>
                     {bulkResult.failed > 0 && (
                       <details>
-                        <summary style={{ cursor: "pointer", color: "#92400e", fontSize: 11 }}>{bulkResult.failed} fallidos · ver detalle</summary>
-                        <div style={{ marginTop: 6, maxHeight: 200, overflowY: "auto", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
+                        <summary style={{ cursor: "pointer", color: "#92400e", fontSize: 11 }}>{bulkResult.failed} fallidos · detalle</summary>
+                        <div style={{ marginTop: 6, maxHeight: 180, overflowY: "auto", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
                           {bulkResult.results.filter((r) => !r.ok).map((r, i) => (
                             <div key={i} style={{ padding: "3px 0", borderBottom: "1px dashed rgba(0,0,0,0.05)" }}>
                               <strong>{r.phone}</strong>: {r.error}
@@ -305,13 +400,39 @@ export default function TemplatesModal({
                     )}
                   </div>
                 )}
-              </div>
+              </>
             )}
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+function componentText(t: MetaTemplate, type: "HEADER" | "BODY" | "FOOTER"): string | undefined {
+  return t.components.find((c) => c.type === type)?.text;
+}
+function countVars(text: string): number {
+  const matches = text.matchAll(/\{\{(\d+)\}\}/g);
+  let max = 0;
+  for (const m of matches) {
+    const n = Number(m[1]);
+    if (n > max) max = n;
+  }
+  return max;
+}
+function renderWithVars(text: string, vars: string[]): React.ReactNode {
+  const parts = text.split(/(\{\{\d+\}\})/g);
+  return parts.map((p, i) => {
+    const m = p.match(/^\{\{(\d+)\}\}$/);
+    if (m) {
+      const idx = Number(m[1]) - 1;
+      const val = vars[idx];
+      if (val) return <strong key={i} style={{ color: PURPLE }}>{val}</strong>;
+      return <span key={i} style={{ background: "rgba(245,158,11,0.18)", color: "#92400e", padding: "1px 5px", borderRadius: 4, fontFamily: "ui-monospace, monospace", fontSize: 11 }}>{p}</span>;
+    }
+    return <span key={i}>{p}</span>;
+  });
 }
 
 function parsePhones(input: string): string[] {
@@ -331,54 +452,13 @@ function parsePhones(input: string): string[] {
 function TabBtn({ cur, v, set, label, disabled }: { cur: Mode; v: Mode; set: (v: Mode) => void; label: string; disabled?: boolean }) {
   const active = cur === v;
   return (
-    <button
-      onClick={() => !disabled && set(v)}
-      disabled={disabled}
-      style={{
-        padding: "10px 16px",
-        fontSize: 13,
-        fontWeight: 600,
-        background: active ? "#fff" : "transparent",
-        color: disabled ? "#bbb" : active ? PURPLE : "#666",
-        border: "none",
-        borderBottom: active ? `2px solid ${PURPLE}` : "2px solid transparent",
-        marginBottom: -1,
-        cursor: disabled ? "default" : "pointer",
-      }}
-    >
-      {label}
-    </button>
+    <button onClick={() => !disabled && set(v)} disabled={disabled} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 600, background: active ? "#fff" : "transparent", color: disabled ? "#bbb" : active ? PURPLE : "#666", border: "none", borderBottom: active ? `2px solid ${PURPLE}` : "2px solid transparent", marginBottom: -1, cursor: disabled ? "default" : "pointer" }}>{label}</button>
   );
 }
 
-const overlayStyle: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.45)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 100,
-  padding: 20,
-};
-const modalStyle: React.CSSProperties = {
-  background: "#fff",
-  borderRadius: 16,
-  width: "min(900px, 100%)",
-  height: "min(700px, 95vh)",
-  display: "flex",
-  flexDirection: "column",
-  overflow: "hidden",
-  boxShadow: "0 24px 80px rgba(0,0,0,0.25)",
-};
+const overlayStyle: React.CSSProperties = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 16 };
+const modalStyle: React.CSSProperties = { background: "#fff", borderRadius: 16, width: "min(1180px, 100%)", height: "min(760px, 95vh)", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 80px rgba(0,0,0,0.25)" };
 const errBox: React.CSSProperties = { padding: 10, margin: "10px 20px", background: "#fef2f2", border: "1px solid #fecaca", color: "#991b1b", fontSize: 12, borderRadius: 8 };
-const primaryBtn = (disabled: boolean): React.CSSProperties => ({
-  padding: "11px 18px",
-  borderRadius: 8,
-  border: "none",
-  background: disabled ? "rgba(0,0,0,0.06)" : PURPLE,
-  color: disabled ? "#888" : "#fff",
-  fontSize: 13,
-  fontWeight: 700,
-  cursor: disabled ? "default" : "pointer",
-});
+const lblStyle: React.CSSProperties = { fontSize: 10, color: "#888", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 3, display: "block" };
+const inputStyle: React.CSSProperties = { width: "100%", padding: "7px 10px", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6, fontSize: 12, boxSizing: "border-box" };
+const primaryBtn = (disabled: boolean): React.CSSProperties => ({ padding: "11px 18px", borderRadius: 8, border: "none", background: disabled ? "rgba(0,0,0,0.06)" : PURPLE, color: disabled ? "#888" : "#fff", fontSize: 13, fontWeight: 700, cursor: disabled ? "default" : "pointer" });
