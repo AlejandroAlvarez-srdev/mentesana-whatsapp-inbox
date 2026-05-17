@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const PURPLE = "#6A178C";
 
@@ -22,47 +22,158 @@ type Message = {
   is_psychologist: boolean;
 };
 
-type ConvDetail = {
-  conversation: {
-    id: string;
-    phone: string;
-    lead_name: string | null;
-    status: string | null;
-    purchase_status: string | null;
-    purchase_amount: number | null;
-    paid_at: string | null;
-    assigned_psychologist_name: string | null;
-    pipeline_type: string | null;
-    source: string | null;
-    created_at: string;
-  };
-  insight: any;
-  messages: Message[];
+type Conversation = {
+  id: string;
+  phone: string;
+  lead_name: string | null;
+  status: string | null;
+  purchase_status: string | null;
+  purchase_amount: number | null;
+  paid_at: string | null;
+  assigned_to: string | null;
+  assigned_psychologist_name: string | null;
+  pipeline_type: string | null;
+  source: string | null;
+  notes: string | null;
+  created_at: string;
 };
 
-export default function ChatPanel({ conversationId }: { conversationId: string | null }) {
-  const [data, setData] = useState<ConvDetail | null>(null);
+type Agent = { id: string; name: string; email: string; agent_type: string | null };
+type Template = { name: string; count: number };
+type TagItem = { id: string; name: string; color: string };
+
+const STATUSES = ["nuevo", "contactado", "asignado", "pagado", "cerrado"] as const;
+
+export default function ChatPanel({ conversationId, onChanged }: { conversationId: string | null; onChanged?: () => void }) {
+  const [conv, setConv] = useState<Conversation | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [tags, setTags] = useState<TagItem[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastMsgTsRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (!conversationId) {
-      setData(null);
-      return;
-    }
+  const loadFull = useCallback(async () => {
+    if (!conversationId) return;
     setLoading(true);
     setErr(null);
-    fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`)))
-      .then((d) => setData(d))
-      .catch((e) => setErr(String(e)))
-      .finally(() => setLoading(false));
+    try {
+      const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}`, { credentials: "include" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      setConv(d.conversation);
+      setMessages(d.messages ?? []);
+      const last = (d.messages ?? []).slice(-1)[0]?.timestamp ?? null;
+      lastMsgTsRef.current = last;
+      // mark read (fire and forget)
+      void fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/mark-read`, { method: "POST", credentials: "include" });
+    } catch (e: any) {
+      setErr(String(e.message ?? e));
+    } finally {
+      setLoading(false);
+    }
+  }, [conversationId]);
+
+  useEffect(() => {
+    setConv(null);
+    setMessages([]);
+    lastMsgTsRef.current = null;
+    void loadFull();
+  }, [conversationId, loadFull]);
+
+  // Load auxiliaries once
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/admin/inbox-v2/agents", { credentials: "include" }).then((r) => (r.ok ? r.json() : { agents: [] })),
+      fetch("/api/admin/inbox-v2/templates", { credentials: "include" }).then((r) => (r.ok ? r.json() : { templates: [] })),
+      fetch("/api/admin/inbox-v2/tags", { credentials: "include" }).then((r) => (r.ok ? r.json() : { tags: [] })),
+    ]).then(([a, t, g]) => {
+      setAgents(a.agents ?? []);
+      setTemplates(t.templates ?? []);
+      setTags(g.tags ?? []);
+    });
+  }, []);
+
+  // Polling for new messages while conversation is open
+  useEffect(() => {
+    if (!conversationId) return;
+    const iv = setInterval(async () => {
+      if (!lastMsgTsRef.current) return;
+      try {
+        const r = await fetch(
+          `/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/poll?since=${encodeURIComponent(lastMsgTsRef.current)}`,
+          { credentials: "include" },
+        );
+        if (!r.ok) return;
+        const d = await r.json();
+        const newMsgs: Message[] = d.messages ?? [];
+        if (newMsgs.length > 0) {
+          setMessages((prev) => [...prev, ...newMsgs.filter((m) => !prev.find((p) => p.id === m.id))]);
+          lastMsgTsRef.current = newMsgs[newMsgs.length - 1].timestamp;
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 6000);
+    return () => clearInterval(iv);
   }, [conversationId]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [data]);
+  }, [messages.length]);
+
+  async function patchConv(patch: Partial<Conversation>) {
+    if (!conversationId) return;
+    const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      setConv((c) => (c ? { ...c, ...d.conversation } : c));
+      onChanged?.();
+    } else {
+      setErr(`PATCH ${r.status}`);
+    }
+  }
+
+  async function send(text: string) {
+    if (!conversationId || !text.trim()) return;
+    const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/send-text`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, agent_name: "agente" }),
+    });
+    if (r.ok) {
+      // refetch para que aparezca el mensaje real
+      await loadFull();
+    } else {
+      const t = await r.text();
+      setErr(t.slice(0, 200));
+    }
+  }
+
+  async function sendTemplateNow(name: string) {
+    if (!conversationId) return;
+    if (!confirm(`Enviar template "${name}"? (no es reversible)`)) return;
+    const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/send-template`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ template_name: name, language: "es", agent_name: "agente" }),
+    });
+    if (r.ok) {
+      await loadFull();
+    } else {
+      const t = await r.text();
+      setErr(t.slice(0, 300));
+    }
+  }
 
   if (!conversationId) {
     return (
@@ -74,45 +185,165 @@ export default function ChatPanel({ conversationId }: { conversationId: string |
       </div>
     );
   }
-
-  if (loading) return <div style={emptyStyle}><span style={{ color: "#aaa" }}>Cargando…</span></div>;
-  if (err) return <div style={emptyStyle}><span style={{ color: "#900" }}>Error: {err}</span></div>;
-  if (!data) return null;
-
-  const c = data.conversation;
+  if (loading && !conv) return <div style={emptyStyle}><span style={{ color: "#aaa" }}>Cargando…</span></div>;
+  if (err && !conv) return <div style={emptyStyle}><span style={{ color: "#900" }}>Error: {err}</span></div>;
+  if (!conv) return null;
 
   return (
     <div style={{ background: "#fff", borderRadius: 12, border: "1px solid rgba(0,0,0,0.06)", display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
-      {/* header */}
-      <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(0,0,0,0.06)", display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-        <span style={{ fontWeight: 700, fontSize: 15, color: "#1a1a2e" }}>
-          {c.lead_name?.trim() || "(sin nombre)"}
-        </span>
-        <span style={{ fontSize: 12, color: "#888" }}>{c.phone}</span>
-        {c.assigned_psychologist_name && (
-          <span style={{ fontSize: 11, color: PURPLE, fontWeight: 600 }}>· {c.assigned_psychologist_name}</span>
-        )}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          {c.status && <Tag label={c.status} color="#666" />}
-          {c.pipeline_type && <Tag label={c.pipeline_type} color="#666" />}
-          {(c.purchase_status === "pagado" || c.paid_at) && <Tag label={`PAGÓ ${c.purchase_amount ?? ""}€`} color={PURPLE} solid />}
+      {/* Header */}
+      <div style={{ padding: "10px 14px", borderBottom: "1px solid rgba(0,0,0,0.06)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span style={{ fontWeight: 700, fontSize: 15, color: "#1a1a2e" }}>{conv.lead_name?.trim() || "(sin nombre)"}</span>
+            <span style={{ fontSize: 12, color: "#888" }}>{conv.phone}</span>
+            {(conv.purchase_status === "pagado" || conv.paid_at || conv.status === "pagado") && (
+              <Tag label={`PAGÓ ${conv.purchase_amount ?? ""}€`} color={PURPLE} solid />
+            )}
+          </div>
+          {conv.assigned_psychologist_name && (
+            <span style={{ fontSize: 11, color: PURPLE, fontWeight: 600 }}>👩‍⚕️ {conv.assigned_psychologist_name}</span>
+          )}
         </div>
+
+        {/* Status */}
+        <select
+          value={conv.status ?? ""}
+          onChange={(e) => patchConv({ status: e.target.value })}
+          style={selectStyle}
+          title="Estado"
+        >
+          <option value="">— estado —</option>
+          {STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+
+        {/* Assigned */}
+        <select
+          value={conv.assigned_to ?? ""}
+          onChange={(e) => patchConv({ assigned_to: e.target.value || null })}
+          style={selectStyle}
+          title="Asignado"
+        >
+          <option value="">— asignar —</option>
+          {agents.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name?.trim()} {a.agent_type ? `· ${a.agent_type}` : ""}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* messages */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "16px 14px", background: "#FAFAFA" }}>
-        {data.messages.length === 0 && (
-          <div style={{ textAlign: "center", color: "#aaa", fontSize: 12, padding: 30 }}>Sin mensajes.</div>
-        )}
-        {data.messages.map((m) => (
-          <Bubble key={m.id} m={m} />
-        ))}
+        {messages.length === 0 && <div style={{ textAlign: "center", color: "#aaa", fontSize: 12, padding: 30 }}>Sin mensajes.</div>}
+        {messages.map((m) => <Bubble key={m.id} m={m} />)}
       </div>
 
-      {/* footer info */}
-      <div style={{ padding: "8px 14px", borderTop: "1px solid rgba(0,0,0,0.06)", fontSize: 11, color: "#aaa", textAlign: "center" }}>
-        Read-only · {data.messages.length} mensajes · enviar disponible en Sprint 6
+      {/* Compose */}
+      <Composer onSend={send} templates={templates} onTemplate={sendTemplateNow} />
+      {err && <div style={{ padding: "6px 14px", fontSize: 11, color: "#900", background: "#fee" }}>{err}</div>}
+    </div>
+  );
+}
+
+function Composer({ onSend, templates, onTemplate }: { onSend: (text: string) => Promise<void>; templates: Template[]; onTemplate: (name: string) => Promise<void> }) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [showTpl, setShowTpl] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  async function handleSend() {
+    if (!text.trim() || sending) return;
+    setSending(true);
+    await onSend(text.trim());
+    setText("");
+    setSending(false);
+    inputRef.current?.focus();
+  }
+
+  return (
+    <div style={{ borderTop: "1px solid rgba(0,0,0,0.06)", padding: "10px 12px", background: "#fff", position: "relative" }}>
+      {showTpl && (
+        <div style={{ position: "absolute", bottom: 60, left: 12, right: 12, background: "#fff", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.08)", maxHeight: 280, overflowY: "auto", zIndex: 5 }}>
+          <div style={{ padding: "8px 12px", fontSize: 11, color: "#888", fontWeight: 600, letterSpacing: 0.5, borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
+            TEMPLATES META (uso histórico)
+          </div>
+          {templates.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "#aaa" }}>No hay templates.</div>}
+          {templates.map((t) => (
+            <button
+              key={t.name}
+              onClick={() => {
+                setShowTpl(false);
+                void onTemplate(t.name);
+              }}
+              style={{
+                width: "100%",
+                textAlign: "left",
+                padding: "8px 12px",
+                fontSize: 12,
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                display: "flex",
+                justifyContent: "space-between",
+                borderBottom: "1px solid rgba(0,0,0,0.04)",
+              }}
+            >
+              <span style={{ color: "#1a1a2e", fontFamily: "ui-monospace, monospace" }}>{t.name}</span>
+              <span style={{ color: "#888" }}>×{t.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <button onClick={() => setShowTpl((v) => !v)} title="Insertar template" style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.1)", background: "#fff", cursor: "pointer", fontSize: 16 }}>
+          📋
+        </button>
+        <textarea
+          ref={inputRef}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              void handleSend();
+            }
+          }}
+          placeholder="Escribe el mensaje… (Cmd/Ctrl+Enter para enviar)"
+          rows={2}
+          style={{
+            flex: 1,
+            padding: "8px 12px",
+            borderRadius: 8,
+            border: "1px solid rgba(0,0,0,0.1)",
+            fontSize: 13,
+            resize: "none",
+            outline: "none",
+            fontFamily: "inherit",
+          }}
+        />
+        <button
+          onClick={handleSend}
+          disabled={sending || !text.trim()}
+          style={{
+            padding: "10px 20px",
+            borderRadius: 8,
+            border: "none",
+            cursor: sending || !text.trim() ? "default" : "pointer",
+            background: sending || !text.trim() ? "rgba(0,0,0,0.06)" : PURPLE,
+            color: sending || !text.trim() ? "#888" : "#fff",
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          {sending ? "Enviando…" : "Enviar"}
+        </button>
       </div>
+      <div style={{ marginTop: 4, fontSize: 10, color: "#bbb" }}>WhatsApp Cloud API · vía inbox-v2-server</div>
     </div>
   );
 }
@@ -129,15 +360,11 @@ function Bubble({ m }: { m: Message }) {
         {!isLead && (
           <div style={{ fontSize: 10, color: "#888", fontWeight: 600, marginBottom: 2 }}>
             {m.is_psychologist ? "PSIC" : m.sender_name || m.sender || "AGENTE"}
-            {m.is_template && m.template_name && (
-              <span style={{ marginLeft: 6, color: "#aaa", fontWeight: 400 }}>· template: {m.template_name}</span>
-            )}
+            {m.is_template && m.template_name && <span style={{ marginLeft: 6, color: "#aaa", fontWeight: 400 }}>· template: {m.template_name}</span>}
           </div>
         )}
         <div style={{ fontSize: 13, color: "#1a1a2e", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.content || (m.media_url ? `[media: ${m.media_type}]` : "—")}</div>
-        {m.media_url && m.media_type?.startsWith("image") && (
-          <img src={m.media_url} alt="media" style={{ marginTop: 6, maxWidth: 240, borderRadius: 6 }} />
-        )}
+        {m.media_url && m.media_type?.startsWith("image") && <img src={m.media_url} alt="media" style={{ marginTop: 6, maxWidth: 240, borderRadius: 6 }} />}
         <div style={{ fontSize: 10, color: "#bbb", marginTop: 4, textAlign: "right" }}>
           {fmtTime(m.timestamp)}
           {m.status && <span> · {m.status}</span>}
@@ -148,9 +375,7 @@ function Bubble({ m }: { m: Message }) {
 }
 
 function Tag({ label, color, solid }: { label: string; color: string; solid?: boolean }) {
-  return (
-    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 700, background: solid ? color : `${color}1a`, color: solid ? "#fff" : color, textTransform: "uppercase" }}>{label}</span>
-  );
+  return <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 700, background: solid ? color : `${color}1a`, color: solid ? "#fff" : color, textTransform: "uppercase" }}>{label}</span>;
 }
 
 function fmtTime(iso: string): string {
@@ -158,11 +383,12 @@ function fmtTime(iso: string): string {
   return d.toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-const emptyStyle: React.CSSProperties = {
+const emptyStyle: React.CSSProperties = { background: "#fff", borderRadius: 12, border: "1px solid rgba(0,0,0,0.06)", display: "flex", alignItems: "center", justifyContent: "center" };
+const selectStyle: React.CSSProperties = {
+  padding: "5px 8px",
+  fontSize: 12,
+  borderRadius: 6,
+  border: "1px solid rgba(0,0,0,0.1)",
   background: "#fff",
-  borderRadius: 12,
-  border: "1px solid rgba(0,0,0,0.06)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
+  cursor: "pointer",
 };

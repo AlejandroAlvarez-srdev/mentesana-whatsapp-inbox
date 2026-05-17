@@ -24,6 +24,18 @@ type Insight = {
   resumen: string | null;
 } | null;
 
+type LeadProfile = {
+  conversation: any;
+  contact: any | null;
+  payments: { id: string; amount_cents: number | null; currency: string | null; status: string | null; psychologist: string | null; source: string | null; stripe_session_id: string | null; created_at: string; metadata: any }[];
+  tags: { id: string; name: string; color: string }[];
+  total_messages: number;
+};
+
+type TagMaster = { id: string; name: string; color: string; description: string | null };
+
+type Tab = "insights" | "perfil";
+
 export default function InsightsPanel({
   conversationId,
   selectedSummary,
@@ -31,38 +43,40 @@ export default function InsightsPanel({
   conversationId: string | null;
   selectedSummary: ConvSummary | null;
 }) {
+  const [tab, setTab] = useState<Tab>("insights");
   const [insight, setInsight] = useState<Insight>(null);
   const [risk, setRisk] = useState<RiskResp | null>(null);
-  const [loadingInsight, setLoadingInsight] = useState(false);
-
+  const [profile, setProfile] = useState<LeadProfile | null>(null);
+  const [tagMaster, setTagMaster] = useState<TagMaster[]>([]);
+  const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<string>("");
   const [summaryStreaming, setSummaryStreaming] = useState(false);
   const [summaryErr, setSummaryErr] = useState<string | null>(null);
-
   const [reply, setReply] = useState<string>("");
   const [replyStreaming, setReplyStreaming] = useState(false);
   const [replyErr, setReplyErr] = useState<string | null>(null);
 
-  // load insight + risk al cambiar conversación
+  useEffect(() => {
+    fetch("/api/admin/inbox-v2/tags", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { tags: [] }))
+      .then((d) => setTagMaster(d.tags ?? []));
+  }, []);
+
   useEffect(() => {
     setInsight(null);
     setRisk(null);
+    setProfile(null);
     setSummary("");
     setSummaryErr(null);
     setReply("");
     setReplyErr(null);
     if (!conversationId) return;
-    setLoadingInsight(true);
+    setLoading(true);
     Promise.all([
-      fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}?messages=false`, { credentials: "include" })
-        .then((r) => (r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`)))
-        .then((d) => setInsight(d.insight ?? null))
-        .catch(() => {}),
-      fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/risk-flags`, { credentials: "include" })
-        .then((r) => (r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`)))
-        .then((d) => setRisk(d))
-        .catch(() => {}),
-    ]).finally(() => setLoadingInsight(false));
+      fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}?messages=false`, { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))).then((d) => setInsight(d.insight ?? null)).catch(() => {}),
+      fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/risk-flags`, { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))).then((d) => setRisk(d)).catch(() => {}),
+      fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/lead-profile`, { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))).then((d) => setProfile(d)).catch(() => {}),
+    ]).finally(() => setLoading(false));
   }, [conversationId]);
 
   async function runSummary() {
@@ -71,14 +85,8 @@ export default function InsightsPanel({
     setSummaryErr(null);
     setSummaryStreaming(true);
     try {
-      const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/summary`, {
-        method: "POST",
-        credentials: "include",
-      });
-      if (!r.ok || !r.body) {
-        const txt = await r.text();
-        throw new Error(`HTTP ${r.status}: ${txt.slice(0, 200)}`);
-      }
+      const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/summary`, { method: "POST", credentials: "include" });
+      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
       const reader = r.body.getReader();
       const dec = new TextDecoder();
       let acc = "";
@@ -101,14 +109,8 @@ export default function InsightsPanel({
     setReplyErr(null);
     setReplyStreaming(true);
     try {
-      const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/suggested-reply`, {
-        method: "POST",
-        credentials: "include",
-      });
-      if (!r.ok || !r.body) {
-        const txt = await r.text();
-        throw new Error(`HTTP ${r.status}: ${txt.slice(0, 200)}`);
-      }
+      const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/suggested-reply`, { method: "POST", credentials: "include" });
+      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
       const reader = r.body.getReader();
       const dec = new TextDecoder();
       let acc = "";
@@ -125,81 +127,232 @@ export default function InsightsPanel({
     }
   }
 
+  async function attachTag(tagId: string) {
+    if (!conversationId) return;
+    await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/tags`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tag_id: tagId }),
+    });
+    refreshProfile();
+  }
+  async function detachTag(tagId: string) {
+    if (!conversationId) return;
+    await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/tags/${encodeURIComponent(tagId)}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    refreshProfile();
+  }
+
+  function refreshProfile() {
+    if (!conversationId) return;
+    fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/lead-profile`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setProfile(d));
+  }
+
+  async function saveNotes(notes: string) {
+    if (!conversationId) return;
+    await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notes }),
+    });
+    refreshProfile();
+  }
+
   if (!conversationId) {
-    return <div style={panelStyle}><div style={{ color: "#aaa", fontSize: 12, padding: 20, textAlign: "center" }}>Selecciona una conversación para ver insights, riesgo y sugerencia de respuesta.</div></div>;
+    return <div style={panelStyle}><div style={{ color: "#aaa", fontSize: 12, padding: 20, textAlign: "center" }}>Selecciona una conversación.</div></div>;
   }
 
   return (
     <div style={panelStyle}>
-      <div style={{ overflowY: "auto", flex: 1, padding: 14 }}>
-        {risk && risk.flag_count > 0 && <RiskBanner risk={risk} />}
-
-        <Section title="🧠 Insight Claude" subtitle={loadingInsight ? "cargando…" : insight ? null : "Aún no procesado por el extractor"}>
-          {insight && (
-            <div style={{ display: "grid", gap: 10, fontSize: 12 }}>
-              {insight.dolor_principal && (
-                <Field label="Dolor principal">{insight.dolor_principal}</Field>
-              )}
-              {insight.objeciones && insight.objeciones.length > 0 && (
-                <Field label="Objeciones">
-                  <Pills items={insight.objeciones} />
-                </Field>
-              )}
-              {insight.triggers_compra && insight.triggers_compra.length > 0 && (
-                <Field label="Triggers">
-                  <Pills items={insight.triggers_compra} color={PURPLE} />
-                </Field>
-              )}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {insight.sentimiento && <Mini label="Sentimiento" v={insight.sentimiento} />}
-                {insight.precio_sensibilidad && <Mini label="Precio" v={insight.precio_sensibilidad} />}
-                {insight.canal_descubrimiento && <Mini label="Canal" v={insight.canal_descubrimiento} />}
-              </div>
-              {insight.momento_vital && <Field label="Momento vital">{insight.momento_vital}</Field>}
-              {insight.quote_marketing && (
-                <Field label="Quote">
-                  <em style={{ color: "#1a1a2e", fontSize: 12 }}>&ldquo;{insight.quote_marketing}&rdquo;</em>
-                </Field>
-              )}
-              {insight.resumen && <Field label="Resumen">{insight.resumen}</Field>}
-            </div>
-          )}
-        </Section>
-
-        <Section
-          title="📝 Resumen de la conversación"
-          subtitle="Generado al vuelo por Claude Haiku"
-          action={
-            <button onClick={runSummary} disabled={summaryStreaming} style={btnStyle(summaryStreaming)}>
-              {summaryStreaming ? "Generando…" : summary ? "Regenerar" : "Generar"}
-            </button>
-          }
-        >
-          {summaryErr && <div style={errBox}>{summaryErr}</div>}
-          {summary ? (
-            <Markdown text={summary} />
-          ) : !summaryStreaming && (
-            <div style={{ color: "#aaa", fontSize: 12 }}>Pulsa &ldquo;Generar&rdquo; para resumir la conversación.</div>
-          )}
-        </Section>
-
-        <Section
-          title="💡 Respuesta sugerida (RAG)"
-          subtitle="Cruza conversaciones similares que SÍ pagaron"
-          action={
-            <button onClick={runReply} disabled={replyStreaming} style={btnStyle(replyStreaming)}>
-              {replyStreaming ? "Pensando…" : reply ? "Regenerar" : "Sugerir"}
-            </button>
-          }
-        >
-          {replyErr && <div style={errBox}>{replyErr}</div>}
-          {reply ? (
-            <Markdown text={reply} />
-          ) : !replyStreaming && (
-            <div style={{ color: "#aaa", fontSize: 12 }}>Pulsa &ldquo;Sugerir&rdquo; — requiere que la conversación tenga insight extraído.</div>
-          )}
-        </Section>
+      {/* Tabs */}
+      <div style={{ display: "flex", padding: 8, gap: 4, borderBottom: "1px solid rgba(0,0,0,0.06)", flexShrink: 0 }}>
+        <TabBtn cur={tab} v="insights" set={setTab} label="🧠 Insights" />
+        <TabBtn cur={tab} v="perfil" set={setTab} label="👤 Perfil" />
       </div>
+
+      <div style={{ overflowY: "auto", flex: 1, padding: 14 }}>
+        {tab === "insights" && (
+          <>
+            {risk && risk.flag_count > 0 && <RiskBanner risk={risk} />}
+            <Section title="🧠 Insight Claude" subtitle={loading ? "cargando…" : insight ? null : "Aún no procesado por el extractor"}>
+              {insight && <InsightFields i={insight} />}
+            </Section>
+            <Section
+              title="📝 Resumen"
+              subtitle="Claude Haiku al vuelo"
+              action={<button onClick={runSummary} disabled={summaryStreaming} style={btnStyle(summaryStreaming)}>{summaryStreaming ? "Generando…" : summary ? "Regenerar" : "Generar"}</button>}
+            >
+              {summaryErr && <div style={errBox}>{summaryErr}</div>}
+              {summary ? <Markdown text={summary} /> : !summaryStreaming && <div style={{ color: "#aaa", fontSize: 12 }}>Pulsa &ldquo;Generar&rdquo;.</div>}
+            </Section>
+            <Section
+              title="💡 Respuesta sugerida (RAG)"
+              subtitle="Cruza con conversaciones pagadas similares"
+              action={<button onClick={runReply} disabled={replyStreaming} style={btnStyle(replyStreaming)}>{replyStreaming ? "Pensando…" : reply ? "Regenerar" : "Sugerir"}</button>}
+            >
+              {replyErr && <div style={errBox}>{replyErr}</div>}
+              {reply ? <Markdown text={reply} /> : !replyStreaming && <div style={{ color: "#aaa", fontSize: 12 }}>Requiere insight extraído.</div>}
+            </Section>
+          </>
+        )}
+
+        {tab === "perfil" && (
+          <ProfileTab
+            profile={profile}
+            tagMaster={tagMaster}
+            onAttachTag={attachTag}
+            onDetachTag={detachTag}
+            onSaveNotes={saveNotes}
+            loading={loading}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProfileTab({
+  profile,
+  tagMaster,
+  onAttachTag,
+  onDetachTag,
+  onSaveNotes,
+  loading,
+}: {
+  profile: LeadProfile | null;
+  tagMaster: TagMaster[];
+  onAttachTag: (id: string) => void;
+  onDetachTag: (id: string) => void;
+  onSaveNotes: (notes: string) => void;
+  loading: boolean;
+}) {
+  const [notes, setNotes] = useState("");
+  const [notesDirty, setNotesDirty] = useState(false);
+
+  useEffect(() => {
+    setNotes(profile?.conversation?.notes ?? profile?.contact?.notes ?? "");
+    setNotesDirty(false);
+  }, [profile?.conversation?.id]);
+
+  if (loading && !profile) return <div style={{ color: "#aaa", fontSize: 12 }}>Cargando perfil…</div>;
+  if (!profile) return <div style={{ color: "#aaa", fontSize: 12 }}>Sin perfil.</div>;
+
+  const c = profile.contact ?? profile.conversation;
+  const currentTagIds = new Set(profile.tags.map((t) => t.id));
+  const availableTags = tagMaster.filter((t) => !currentTagIds.has(t.id));
+
+  return (
+    <>
+      <Section title="👤 Contacto">
+        <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
+          <Row k="Nombre" v={c?.lead_name?.trim() || "—"} />
+          <Row k="Teléfono" v={profile.conversation.phone} />
+          <Row k="Email" v={c?.email ?? "—"} />
+          <Row k="Origen" v={c?.source ?? "—"} />
+          <Row k="UTM" v={[c?.utm_source, c?.utm_medium, c?.utm_campaign].filter(Boolean).join(" / ") || "—"} />
+          <Row k="Test score" v={c?.test_score ?? "—"} />
+          <Row k="Cliente" v={c?.client_type ?? "—"} />
+          <Row k="Prioridad" v={c?.priority ?? "—"} />
+          <Row k="Total mensajes" v={profile.total_messages} />
+        </div>
+      </Section>
+
+      <Section title="🏷️ Tags">
+        {profile.tags.length === 0 && <div style={{ fontSize: 11, color: "#aaa", marginBottom: 8 }}>Sin etiquetas asignadas.</div>}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+          {profile.tags.map((t) => (
+            <button key={t.id} onClick={() => onDetachTag(t.id)} title="Quitar tag" style={{ background: t.color, color: "#fff", padding: "3px 9px", borderRadius: 6, fontSize: 11, fontWeight: 700, border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+              {t.name} ✕
+            </button>
+          ))}
+        </div>
+        {availableTags.length > 0 && (
+          <details>
+            <summary style={{ fontSize: 11, color: "#888", cursor: "pointer", marginBottom: 6 }}>+ Añadir tag ({availableTags.length} disponibles)</summary>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+              {availableTags.map((t) => (
+                <button key={t.id} onClick={() => onAttachTag(t.id)} style={{ background: `${t.color}22`, color: t.color, padding: "3px 9px", borderRadius: 6, fontSize: 11, fontWeight: 600, border: `1px solid ${t.color}55`, cursor: "pointer" }}>
+                  + {t.name}
+                </button>
+              ))}
+            </div>
+          </details>
+        )}
+      </Section>
+
+      <Section title="💳 Pagos">
+        {profile.payments.length === 0 ? (
+          <div style={{ fontSize: 11, color: "#aaa" }}>Sin pagos registrados.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 6 }}>
+            {profile.payments.map((p) => (
+              <div key={p.id} style={{ padding: "8px 10px", background: "rgba(0,0,0,0.02)", borderRadius: 8, fontSize: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <strong style={{ color: PURPLE }}>{((p.amount_cents ?? 0) / 100).toFixed(2)} {(p.currency ?? "EUR").toUpperCase()}</strong>
+                  <span style={{ color: p.status === "succeeded" || p.status === "paid" ? "#059669" : "#888", fontWeight: 600, fontSize: 11 }}>{p.status ?? "—"}</span>
+                </div>
+                <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>
+                  {p.psychologist && <span>👩‍⚕️ {p.psychologist} · </span>}
+                  {p.source && <span>{p.source} · </span>}
+                  {new Date(p.created_at).toLocaleDateString("es-ES")}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      <Section
+        title="📓 Notas internas"
+        action={
+          notesDirty ? (
+            <button
+              onClick={() => {
+                onSaveNotes(notes);
+                setNotesDirty(false);
+              }}
+              style={btnStyle(false)}
+            >
+              Guardar
+            </button>
+          ) : undefined
+        }
+      >
+        <textarea
+          value={notes}
+          onChange={(e) => {
+            setNotes(e.target.value);
+            setNotesDirty(true);
+          }}
+          rows={5}
+          placeholder="Notas internas sobre el lead…"
+          style={{ width: "100%", padding: 8, fontSize: 12, border: "1px solid rgba(0,0,0,0.1)", borderRadius: 8, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }}
+        />
+      </Section>
+    </>
+  );
+}
+
+function InsightFields({ i }: { i: NonNullable<Insight> }) {
+  return (
+    <div style={{ display: "grid", gap: 10, fontSize: 12 }}>
+      {i.dolor_principal && <Field label="Dolor principal">{i.dolor_principal}</Field>}
+      {i.objeciones && i.objeciones.length > 0 && <Field label="Objeciones"><Pills items={i.objeciones} /></Field>}
+      {i.triggers_compra && i.triggers_compra.length > 0 && <Field label="Triggers"><Pills items={i.triggers_compra} color={PURPLE} /></Field>}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {i.sentimiento && <Mini label="Sent." v={i.sentimiento} />}
+        {i.precio_sensibilidad && <Mini label="Precio" v={i.precio_sensibilidad} />}
+        {i.canal_descubrimiento && <Mini label="Canal" v={i.canal_descubrimiento} />}
+      </div>
+      {i.momento_vital && <Field label="Momento vital">{i.momento_vital}</Field>}
+      {i.quote_marketing && <Field label="Quote"><em>&ldquo;{i.quote_marketing}&rdquo;</em></Field>}
+      {i.resumen && <Field label="Resumen">{i.resumen}</Field>}
     </div>
   );
 }
@@ -208,24 +361,29 @@ function RiskBanner({ risk }: { risk: RiskResp }) {
   const color = risk.max_level === "critico" ? "#dc2626" : risk.max_level === "alto" ? "#f59e0b" : "#3b82f6";
   return (
     <div style={{ background: `${color}1a`, border: `1px solid ${color}55`, borderRadius: 10, padding: 10, marginBottom: 14 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color, textTransform: "uppercase", marginBottom: 6 }}>
-        ⚠️ {risk.flag_count} flag{risk.flag_count === 1 ? "" : "s"} de riesgo · nivel {risk.max_level}
-      </div>
-      <div style={{ display: "grid", gap: 4 }}>
-        {risk.flags.slice(0, 5).map((f, i) => (
-          <div key={i} style={{ fontSize: 11, color: "#333" }}>
-            <strong style={{ color }}>{f.label}:</strong> <em>&ldquo;{f.match}&rdquo;</em>
-          </div>
-        ))}
-      </div>
+      <div style={{ fontSize: 11, fontWeight: 700, color, textTransform: "uppercase", marginBottom: 6 }}>⚠️ {risk.flag_count} flag{risk.flag_count === 1 ? "" : "s"} de riesgo · nivel {risk.max_level}</div>
+      {risk.flags.slice(0, 5).map((f, i) => (
+        <div key={i} style={{ fontSize: 11, color: "#333" }}>
+          <strong style={{ color }}>{f.label}:</strong> <em>&ldquo;{f.match}&rdquo;</em>
+        </div>
+      ))}
     </div>
+  );
+}
+
+function TabBtn({ cur, v, set, label }: { cur: Tab; v: Tab; set: (v: Tab) => void; label: string }) {
+  const active = cur === v;
+  return (
+    <button onClick={() => set(v)} style={{ flex: 1, padding: "8px 12px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: "none", cursor: "pointer", background: active ? "rgba(106,23,140,0.08)" : "transparent", color: active ? PURPLE : "#666" }}>
+      {label}
+    </button>
   );
 }
 
 function Section({ title, subtitle, children, action }: { title: string; subtitle?: string | null; children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 18 }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2e" }}>{title}</div>
           {subtitle && <div style={{ fontSize: 10, color: "#888" }}>{subtitle}</div>}
@@ -242,6 +400,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div>
       <div style={{ fontSize: 10, color: "#888", fontWeight: 600, letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 3 }}>{label}</div>
       <div style={{ fontSize: 12, color: "#1a1a2e" }}>{children}</div>
+    </div>
+  );
+}
+
+function Row({ k, v }: { k: string; v: any }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12 }}>
+      <span style={{ color: "#888", flexShrink: 0 }}>{k}</span>
+      <span style={{ color: "#1a1a2e", textAlign: "right", wordBreak: "break-word" }}>{v ?? "—"}</span>
     </div>
   );
 }
@@ -267,35 +434,10 @@ function Mini({ label, v }: { label: string; v: string }) {
 }
 
 function Markdown({ text }: { text: string }) {
-  // Render muy básico de **bold** y saltos de línea. Suficiente para summaries y suggested-reply.
-  const html = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\n/g, "<br/>");
+  const html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br/>");
   return <div style={{ fontSize: 12.5, lineHeight: 1.5, color: "#1a1a2e" }} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-const panelStyle: React.CSSProperties = {
-  background: "#fff",
-  borderRadius: 12,
-  border: "1px solid rgba(0,0,0,0.06)",
-  display: "flex",
-  flexDirection: "column",
-  minHeight: 0,
-  overflow: "hidden",
-};
-
+const panelStyle: React.CSSProperties = { background: "#fff", borderRadius: 12, border: "1px solid rgba(0,0,0,0.06)", display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" };
 const errBox: React.CSSProperties = { fontSize: 11, color: "#900", background: "#fee", border: "1px solid #fcc", padding: 6, borderRadius: 6, marginBottom: 6 };
-
-const btnStyle = (disabled: boolean): React.CSSProperties => ({
-  padding: "5px 12px",
-  fontSize: 11,
-  fontWeight: 600,
-  borderRadius: 6,
-  border: "none",
-  cursor: disabled ? "default" : "pointer",
-  background: disabled ? "rgba(0,0,0,0.06)" : PURPLE,
-  color: disabled ? "#888" : "#fff",
-});
+const btnStyle = (disabled: boolean): React.CSSProperties => ({ padding: "5px 12px", fontSize: 11, fontWeight: 600, borderRadius: 6, border: "none", cursor: disabled ? "default" : "pointer", background: disabled ? "rgba(0,0,0,0.06)" : PURPLE, color: disabled ? "#888" : "#fff" });
