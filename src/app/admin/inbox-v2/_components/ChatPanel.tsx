@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import TemplatesModal from "./TemplatesModal";
 
 const PURPLE = "#6A178C";
 
@@ -39,7 +40,6 @@ type Conversation = {
 };
 
 type Agent = { id: string; name: string; email: string; agent_type: string | null };
-type Template = { name: string; count: number };
 type TagItem = { id: string; name: string; color: string };
 
 const STATUSES = ["nuevo", "contactado", "asignado", "pagado", "cerrado"] as const;
@@ -50,8 +50,8 @@ export default function ChatPanel({ conversationId, onChanged }: { conversationI
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [templates, setTemplates] = useState<Template[]>([]);
   const [tags, setTags] = useState<TagItem[]>([]);
+  const [tplOpen, setTplOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastMsgTsRef = useRef<string | null>(null);
 
@@ -87,11 +87,9 @@ export default function ChatPanel({ conversationId, onChanged }: { conversationI
   useEffect(() => {
     Promise.all([
       fetch("/api/admin/inbox-v2/agents", { credentials: "include" }).then((r) => (r.ok ? r.json() : { agents: [] })),
-      fetch("/api/admin/inbox-v2/templates", { credentials: "include" }).then((r) => (r.ok ? r.json() : { templates: [] })),
       fetch("/api/admin/inbox-v2/tags", { credentials: "include" }).then((r) => (r.ok ? r.json() : { tags: [] })),
-    ]).then(([a, t, g]) => {
+    ]).then(([a, g]) => {
       setAgents(a.agents ?? []);
-      setTemplates(t.templates ?? []);
       setTags(g.tags ?? []);
     });
   }, []);
@@ -155,23 +153,6 @@ export default function ChatPanel({ conversationId, onChanged }: { conversationI
     } else {
       const t = await r.text();
       setErr(t.slice(0, 200));
-    }
-  }
-
-  async function sendTemplateNow(name: string) {
-    if (!conversationId) return;
-    if (!confirm(`Enviar template "${name}"? (no es reversible)`)) return;
-    const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/send-template`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ template_name: name, language: "es", agent_name: "agente" }),
-    });
-    if (r.ok) {
-      await loadFull();
-    } else {
-      const t = await r.text();
-      setErr(t.slice(0, 300));
     }
   }
 
@@ -244,16 +225,25 @@ export default function ChatPanel({ conversationId, onChanged }: { conversationI
       </div>
 
       {/* Compose */}
-      <Composer onSend={send} templates={templates} onTemplate={sendTemplateNow} />
+      <Composer onSend={send} onOpenTemplates={() => setTplOpen(true)} />
       {err && <div style={{ padding: "6px 14px", fontSize: 11, color: "#900", background: "#fee" }}>{err}</div>}
+
+      <TemplatesModal
+        open={tplOpen}
+        onClose={() => setTplOpen(false)}
+        conversation={conv ? { id: conv.id, phone: conv.phone, lead_name: conv.lead_name } : null}
+        onSent={() => {
+          setTplOpen(false);
+          void loadFull();
+        }}
+      />
     </div>
   );
 }
 
-function Composer({ onSend, templates, onTemplate }: { onSend: (text: string) => Promise<void>; templates: Template[]; onTemplate: (name: string) => Promise<void> }) {
+function Composer({ onSend, onOpenTemplates }: { onSend: (text: string) => Promise<void>; onOpenTemplates: () => void }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
-  const [showTpl, setShowTpl] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   async function handleSend() {
@@ -266,42 +256,14 @@ function Composer({ onSend, templates, onTemplate }: { onSend: (text: string) =>
   }
 
   return (
-    <div style={{ borderTop: "1px solid rgba(0,0,0,0.06)", padding: "10px 12px", background: "#fff", position: "relative" }}>
-      {showTpl && (
-        <div style={{ position: "absolute", bottom: 60, left: 12, right: 12, background: "#fff", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.08)", maxHeight: 280, overflowY: "auto", zIndex: 5 }}>
-          <div style={{ padding: "8px 12px", fontSize: 11, color: "#888", fontWeight: 600, letterSpacing: 0.5, borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
-            TEMPLATES META (uso histórico)
-          </div>
-          {templates.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "#aaa" }}>No hay templates.</div>}
-          {templates.map((t) => (
-            <button
-              key={t.name}
-              onClick={() => {
-                setShowTpl(false);
-                void onTemplate(t.name);
-              }}
-              style={{
-                width: "100%",
-                textAlign: "left",
-                padding: "8px 12px",
-                fontSize: 12,
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                display: "flex",
-                justifyContent: "space-between",
-                borderBottom: "1px solid rgba(0,0,0,0.04)",
-              }}
-            >
-              <span style={{ color: "#1a1a2e", fontFamily: "ui-monospace, monospace" }}>{t.name}</span>
-              <span style={{ color: "#888" }}>×{t.count}</span>
-            </button>
-          ))}
-        </div>
-      )}
+    <div style={{ borderTop: "1px solid rgba(0,0,0,0.06)", padding: "10px 12px", background: "#fff" }}>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-        <button onClick={() => setShowTpl((v) => !v)} title="Insertar template" style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.1)", background: "#fff", cursor: "pointer", fontSize: 16 }}>
-          📋
+        <button
+          onClick={onOpenTemplates}
+          title="Plantillas Meta · individual o bulk"
+          style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${PURPLE}55`, background: `${PURPLE}0d`, color: PURPLE, cursor: "pointer", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}
+        >
+          📋 Plantillas
         </button>
         <textarea
           ref={inputRef}
@@ -315,35 +277,17 @@ function Composer({ onSend, templates, onTemplate }: { onSend: (text: string) =>
           }}
           placeholder="Escribe el mensaje… (Cmd/Ctrl+Enter para enviar)"
           rows={2}
-          style={{
-            flex: 1,
-            padding: "8px 12px",
-            borderRadius: 8,
-            border: "1px solid rgba(0,0,0,0.1)",
-            fontSize: 13,
-            resize: "none",
-            outline: "none",
-            fontFamily: "inherit",
-          }}
+          style={{ flex: 1, padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.1)", fontSize: 13, resize: "none", outline: "none", fontFamily: "inherit" }}
         />
         <button
           onClick={handleSend}
           disabled={sending || !text.trim()}
-          style={{
-            padding: "10px 20px",
-            borderRadius: 8,
-            border: "none",
-            cursor: sending || !text.trim() ? "default" : "pointer",
-            background: sending || !text.trim() ? "rgba(0,0,0,0.06)" : PURPLE,
-            color: sending || !text.trim() ? "#888" : "#fff",
-            fontSize: 13,
-            fontWeight: 600,
-          }}
+          style={{ padding: "10px 20px", borderRadius: 8, border: "none", cursor: sending || !text.trim() ? "default" : "pointer", background: sending || !text.trim() ? "rgba(0,0,0,0.06)" : PURPLE, color: sending || !text.trim() ? "#888" : "#fff", fontSize: 13, fontWeight: 600 }}
         >
           {sending ? "Enviando…" : "Enviar"}
         </button>
       </div>
-      <div style={{ marginTop: 4, fontSize: 10, color: "#bbb" }}>WhatsApp Cloud API · vía inbox-v2-server</div>
+      <div style={{ marginTop: 4, fontSize: 10, color: "#bbb" }}>WhatsApp Cloud API · inbox-v2-server v7</div>
     </div>
   );
 }
