@@ -55,12 +55,13 @@ export default function TemplatesModal({
   const [fromNumberId, setFromNumberId] = useState<string>("");
   const [searchTpl, setSearchTpl] = useState("");
   const [bulkInput, setBulkInput] = useState("");
+  const [personalize, setPersonalize] = useState(false);
   const [sending, setSending] = useState(false);
   const [singleResult, setSingleResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
-  // Variables fill state
+  // Variables fill state (modo no-personalizado: mismos valores para todos)
   const [bodyVars, setBodyVars] = useState<string[]>([]);
   const [headerVars, setHeaderVars] = useState<string[]>([]);
   const [headerMediaUrl, setHeaderMediaUrl] = useState("");
@@ -114,6 +115,28 @@ export default function TemplatesModal({
 
   const parsedPhones = useMemo(() => parsePhones(bulkInput), [bulkInput]);
 
+  // Para modo personalizado: cuántas variables esperar por línea (header text + body), si header es media no entra como variable
+  const expectedVarsPerLine = useMemo(() => {
+    if (!selected) return 0;
+    const headerComp = selected.components.find((c) => c.type === "HEADER");
+    const headerTextVars = headerComp?.format === "TEXT" ? countVars(headerComp.text ?? "") : 0;
+    const bodyComp = selected.components.find((c) => c.type === "BODY");
+    const bodyTextVars = countVars(bodyComp?.text ?? "");
+    return headerTextVars + bodyTextVars;
+  }, [selected]);
+
+  const parsedRecipients = useMemo(() => {
+    if (!personalize || !selected) return [] as { phone: string; headerVars: string[]; bodyVars: string[]; lineNumber: number; lineRaw: string; ok: boolean; reason?: string }[];
+    const headerComp = selected.components.find((c) => c.type === "HEADER");
+    const headerTextVars = headerComp?.format === "TEXT" ? countVars(headerComp.text ?? "") : 0;
+    const bodyComp = selected.components.find((c) => c.type === "BODY");
+    const bodyTextVars = countVars(bodyComp?.text ?? "");
+    return parsePersonalized(bulkInput, headerTextVars, bodyTextVars);
+  }, [bulkInput, personalize, selected]);
+
+  const validRecipientsCount = personalize ? parsedRecipients.filter((r) => r.ok).length : parsedPhones.length;
+  const invalidRecipientsCount = personalize ? parsedRecipients.filter((r) => !r.ok).length : 0;
+
   if (!open) return null;
 
   const headerComp = selected?.components.find((c) => c.type === "HEADER");
@@ -147,10 +170,41 @@ export default function TemplatesModal({
   function readyToSend(): { ok: boolean; reason?: string } {
     if (!selected) return { ok: false, reason: "Selecciona una plantilla" };
     if (!fromNumberId) return { ok: false, reason: "Elige número de origen" };
+    // Media del header (URL) sigue siendo compartida también en personalized mode
     if (needsMediaHeader && !headerMediaUrl.trim()) return { ok: false, reason: "Falta URL del media del header" };
+    if (mode === "bulk" && personalize) {
+      // En personalizado, los textos de variables vienen por línea, no de los inputs globales
+      if (validRecipientsCount === 0) return { ok: false, reason: "No hay líneas válidas" };
+      if (invalidRecipientsCount > 0) return { ok: false, reason: `${invalidRecipientsCount} líneas con error` };
+      return { ok: true };
+    }
     if (headerVars.some((v) => !v.trim())) return { ok: false, reason: "Faltan variables del header" };
     if (bodyVars.some((v) => !v.trim())) return { ok: false, reason: "Faltan variables del body" };
     return { ok: true };
+  }
+
+  function buildRecipientsForBulk(): { phone: string; components: any[] }[] {
+    // Genera el array recipients[] para el broadcast personalizado
+    if (!personalize || !selected) return [];
+    const headerComp = selected.components.find((c) => c.type === "HEADER");
+    const headerIsText = headerComp?.format === "TEXT" && countVars(headerComp.text ?? "") > 0;
+    return parsedRecipients.filter((r) => r.ok).map((r) => {
+      const components: any[] = [];
+      if (needsMediaHeader && headerMediaUrl.trim()) {
+        const fmt = (headerComp!.format ?? "").toLowerCase();
+        const param: any = { type: fmt };
+        if (fmt === "image") param.image = { link: headerMediaUrl.trim() };
+        else if (fmt === "video") param.video = { link: headerMediaUrl.trim() };
+        else if (fmt === "document") param.document = { link: headerMediaUrl.trim(), filename: headerMediaUrl.split("/").slice(-1)[0] || "doc.pdf" };
+        components.push({ type: "header", parameters: [param] });
+      } else if (headerIsText) {
+        components.push({ type: "header", parameters: r.headerVars.map((v) => ({ type: "text", text: v })) });
+      }
+      if (r.bodyVars.length > 0) {
+        components.push({ type: "body", parameters: r.bodyVars.map((v) => ({ type: "text", text: v })) });
+      }
+      return { phone: r.phone, components };
+    });
   }
 
   async function sendSingle() {
@@ -181,23 +235,31 @@ export default function TemplatesModal({
   async function sendBulk() {
     if (!selected) return;
     const ready = readyToSend();
-    if (!ready.ok) { setBulkResult({ ok: false, sent_from: { name: "", phone_number_id: "" }, total: parsedPhones.length, success: 0, failed: parsedPhones.length, results: [{ phone: "—", ok: false, error: ready.reason }] }); return; }
-    if (parsedPhones.length === 0 || parsedPhones.length > 500) return;
-    if (!confirm(`Enviar plantilla "${selected.name}" a ${parsedPhones.length} contactos desde "${numbers.find((n) => n.phone_number_id === fromNumberId)?.name ?? "?"}". ¿Continuar?`)) return;
+    const total = personalize ? validRecipientsCount : parsedPhones.length;
+    if (!ready.ok) { setBulkResult({ ok: false, sent_from: { name: "", phone_number_id: "" }, total, success: 0, failed: total, results: [{ phone: "—", ok: false, error: ready.reason }] }); return; }
+    if (total === 0 || total > 500) return;
+    if (!confirm(`Enviar plantilla "${selected.name}" a ${total} contactos desde "${numbers.find((n) => n.phone_number_id === fromNumberId)?.name ?? "?"}"${personalize ? " · variables personalizadas por destinatario" : ""}. ¿Continuar?`)) return;
     setSending(true);
     setBulkResult(null);
     try {
+      const reqBody: any = { template_name: selected.name, language: selected.language, from_number: fromNumberId, agent_name: "agente" };
+      if (personalize) {
+        reqBody.recipients = buildRecipientsForBulk();
+      } else {
+        reqBody.phones = parsedPhones;
+        reqBody.components = buildComponents();
+      }
       const r = await fetch("/api/admin/inbox-v2/broadcast/template", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ template_name: selected.name, language: selected.language, from_number: fromNumberId, components: buildComponents(), phones: parsedPhones, agent_name: "agente" }),
+        body: JSON.stringify(reqBody),
       });
       const j = await r.json();
       setBulkResult(j as BulkResult);
       if (j.ok) onSent?.();
     } catch (e: any) {
-      setBulkResult({ ok: false, sent_from: { name: "", phone_number_id: fromNumberId }, total: parsedPhones.length, success: 0, failed: parsedPhones.length, results: [{ phone: "—", ok: false, error: String(e.message ?? e) }] });
+      setBulkResult({ ok: false, sent_from: { name: "", phone_number_id: fromNumberId }, total, success: 0, failed: total, results: [{ phone: "—", ok: false, error: String(e.message ?? e) }] });
     } finally { setSending(false); }
   }
 
@@ -369,16 +431,52 @@ export default function TemplatesModal({
 
             {mode === "bulk" && (
               <>
-                <label style={lblStyle}>Teléfonos (comas, espacios o saltos de línea)</label>
-                <textarea value={bulkInput} onChange={(e) => setBulkInput(e.target.value)} rows={5} placeholder={"34XXXXXXXXX, 34XXXXXXXXX\n34611111111"} style={{ ...inputStyle, fontFamily: "ui-monospace, monospace", resize: "vertical", minHeight: 90 }} />
+                {expectedVarsPerLine > 0 && (
+                  <div style={{ marginBottom: 10, padding: 8, background: personalize ? "rgba(106,23,140,0.06)" : "rgba(0,0,0,0.03)", borderRadius: 8, border: `1px solid ${personalize ? PURPLE + "55" : "rgba(0,0,0,0.06)"}` }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, color: "#1a1a2e", fontWeight: 600 }}>
+                      <input type="checkbox" checked={personalize} onChange={(e) => setPersonalize(e.target.checked)} />
+                      Personalizar variables por destinatario
+                    </label>
+                    <div style={{ fontSize: 10, color: "#888", marginTop: 4, lineHeight: 1.4 }}>
+                      {personalize
+                        ? `Cada línea: teléfono y luego ${expectedVarsPerLine} valor${expectedVarsPerLine === 1 ? "" : "es"} separados por comas (en orden: ${describeVarOrder(selected!)})`
+                        : "Las mismas variables se envían a todos los destinatarios."}
+                    </div>
+                  </div>
+                )}
+
+                <label style={lblStyle}>{personalize ? "Líneas: teléfono, var1, var2…" : "Teléfonos (comas, espacios o saltos de línea)"}</label>
+                <textarea
+                  value={bulkInput}
+                  onChange={(e) => setBulkInput(e.target.value)}
+                  rows={6}
+                  placeholder={personalize ? bulkPersonalizedPlaceholder(expectedVarsPerLine) : "34XXXXXXXXX, 34XXXXXXXXX\n34611111111"}
+                  style={{ ...inputStyle, fontFamily: "ui-monospace, monospace", resize: "vertical", minHeight: 110 }}
+                />
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4, marginBottom: 8, fontSize: 11 }}>
-                  <span style={{ color: parsedPhones.length > 500 ? "#dc2626" : "#666" }}>
-                    {parsedPhones.length} válidos {parsedPhones.length > 500 && "(máx 500)"}
+                  <span style={{ color: validRecipientsCount > 500 ? "#dc2626" : "#666" }}>
+                    <strong style={{ color: validRecipientsCount > 500 ? "#dc2626" : "#059669" }}>{validRecipientsCount}</strong> válid{validRecipientsCount === 1 ? "o" : "os"}
+                    {invalidRecipientsCount > 0 && <span style={{ color: "#dc2626" }}> · {invalidRecipientsCount} con error</span>}
+                    {validRecipientsCount > 500 && " (máx 500)"}
                   </span>
                   <button onClick={() => setBulkInput("")} style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", fontSize: 11 }}>Limpiar</button>
                 </div>
-                <button onClick={sendBulk} disabled={!readyToSend().ok || parsedPhones.length === 0 || parsedPhones.length > 500 || sending} style={primaryBtn(!readyToSend().ok || parsedPhones.length === 0 || parsedPhones.length > 500 || sending)}>
-                  {sending ? `Enviando a ${parsedPhones.length}…` : `📤 Enviar a ${parsedPhones.length} contacto${parsedPhones.length === 1 ? "" : "s"}`}
+
+                {personalize && invalidRecipientsCount > 0 && (
+                  <details style={{ marginBottom: 8 }}>
+                    <summary style={{ fontSize: 11, color: "#dc2626", cursor: "pointer", fontWeight: 600 }}>{invalidRecipientsCount} líneas con error · ver</summary>
+                    <div style={{ marginTop: 6, maxHeight: 120, overflowY: "auto", fontSize: 11, fontFamily: "ui-monospace, monospace", background: "#fef2f2", padding: 6, borderRadius: 6 }}>
+                      {parsedRecipients.filter((r) => !r.ok).slice(0, 20).map((r, i) => (
+                        <div key={i} style={{ marginBottom: 2 }}>
+                          <strong>L{r.lineNumber}:</strong> {r.reason} <em style={{ color: "#aaa" }}>{r.lineRaw.slice(0, 60)}</em>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+
+                <button onClick={sendBulk} disabled={!readyToSend().ok || validRecipientsCount === 0 || validRecipientsCount > 500 || sending} style={primaryBtn(!readyToSend().ok || validRecipientsCount === 0 || validRecipientsCount > 500 || sending)}>
+                  {sending ? `Enviando a ${validRecipientsCount}…` : `📤 Enviar a ${validRecipientsCount} contacto${validRecipientsCount === 1 ? "" : "s"}`}
                 </button>
                 {!readyToSend().ok && selected && <div style={{ fontSize: 10, color: "#dc2626", marginTop: 4 }}>{readyToSend().reason}</div>}
                 {bulkResult && (
@@ -433,6 +531,66 @@ function renderWithVars(text: string, vars: string[]): React.ReactNode {
     }
     return <span key={i}>{p}</span>;
   });
+}
+
+function parsePersonalized(input: string, headerTextVars: number, bodyTextVars: number): { phone: string; headerVars: string[]; bodyVars: string[]; lineNumber: number; lineRaw: string; ok: boolean; reason?: string }[] {
+  const totalVars = headerTextVars + bodyTextVars;
+  const seenPhones = new Set<string>();
+  const lines = input.split(/\r?\n/);
+  const out: { phone: string; headerVars: string[]; bodyVars: string[]; lineNumber: number; lineRaw: string; ok: boolean; reason?: string }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i].trim();
+    if (!raw) continue;
+    // Separa por comas, tabs o "|" — más permisivo
+    const cols = raw.split(/\s*[,\t|]\s*/).map((s) => s.trim()).filter((s) => s !== "");
+    const lineNumber = i + 1;
+    if (cols.length < 1) continue;
+    const rawPhone = cols[0].replace(/[^\d+]/g, "").replace(/^\+/, "");
+    if (rawPhone.length < 8 || rawPhone.length > 16) {
+      out.push({ phone: rawPhone, headerVars: [], bodyVars: [], lineNumber, lineRaw: raw, ok: false, reason: "teléfono inválido" });
+      continue;
+    }
+    if (seenPhones.has(rawPhone)) {
+      out.push({ phone: rawPhone, headerVars: [], bodyVars: [], lineNumber, lineRaw: raw, ok: false, reason: "duplicado" });
+      continue;
+    }
+    const vars = cols.slice(1);
+    if (vars.length < totalVars) {
+      out.push({ phone: rawPhone, headerVars: [], bodyVars: [], lineNumber, lineRaw: raw, ok: false, reason: `faltan variables: ${vars.length}/${totalVars}` });
+      continue;
+    }
+    if (vars.some((v) => !v)) {
+      out.push({ phone: rawPhone, headerVars: [], bodyVars: [], lineNumber, lineRaw: raw, ok: false, reason: "alguna variable vacía" });
+      continue;
+    }
+    seenPhones.add(rawPhone);
+    out.push({
+      phone: rawPhone,
+      headerVars: vars.slice(0, headerTextVars),
+      bodyVars: vars.slice(headerTextVars, headerTextVars + bodyTextVars),
+      lineNumber,
+      lineRaw: raw,
+      ok: true,
+    });
+  }
+  return out;
+}
+
+function describeVarOrder(t: MetaTemplate): string {
+  const headerComp = t.components.find((c) => c.type === "HEADER");
+  const headerTextVars = headerComp?.format === "TEXT" ? countVars(headerComp.text ?? "") : 0;
+  const bodyComp = t.components.find((c) => c.type === "BODY");
+  const bodyTextVars = countVars(bodyComp?.text ?? "");
+  const parts: string[] = [];
+  for (let i = 1; i <= headerTextVars; i++) parts.push(`header {{${i}}}`);
+  for (let i = 1; i <= bodyTextVars; i++) parts.push(`body {{${i}}}`);
+  return parts.join(", ");
+}
+
+function bulkPersonalizedPlaceholder(varsCount: number): string {
+  const sample1 = ["34XXXXXXXXX"].concat(Array.from({ length: varsCount }, (_, i) => i === 0 ? "Pilar" : i === 1 ? "viernes" : `valor${i + 1}`)).join(", ");
+  const sample2 = ["34XXXXXXXXX"].concat(Array.from({ length: varsCount }, (_, i) => i === 0 ? "Sonia" : i === 1 ? "sábado" : `valor${i + 1}`)).join(", ");
+  return `${sample1}\n${sample2}`;
 }
 
 function parsePhones(input: string): string[] {
