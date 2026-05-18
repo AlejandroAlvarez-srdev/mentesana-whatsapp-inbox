@@ -17,12 +17,19 @@ export default function InboxV2Page() {
   const [view, setView] = useState<View>("list");
   const [insightsOpen, setInsightsOpen] = useState(false);
 
+  // Sincroniza con el hash del URL al mount y a cada hashchange
   useEffect(() => {
-    const hash = typeof window !== "undefined" ? window.location.hash.slice(1) : "";
-    if (hash) {
-      setSelectedId(hash);
-      setView("chat");
-    }
+    if (typeof window === "undefined") return;
+    const apply = () => {
+      const hash = window.location.hash.slice(1);
+      if (hash) {
+        setSelectedId(hash);
+        setView("chat");
+      }
+    };
+    apply();
+    window.addEventListener("hashchange", apply);
+    return () => window.removeEventListener("hashchange", apply);
   }, []);
 
   // si seleccionas conversación en móvil, salta al chat automáticamente
@@ -110,6 +117,7 @@ export default function InboxV2Page() {
               onSelect={(c) => {
                 setSelectedId(c.id);
                 setSelectedSummary(c);
+                if (typeof window !== "undefined") window.history.replaceState(null, "", `#${c.id}`);
               }}
             />
           </div>
