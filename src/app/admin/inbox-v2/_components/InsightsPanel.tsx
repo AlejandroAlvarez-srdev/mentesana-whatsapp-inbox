@@ -156,6 +156,17 @@ export default function InsightsPanel({
       .then((d) => setProfile(d));
   }
 
+  async function patchField(field: string, value: string | null) {
+    if (!conversationId) return;
+    await fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [field]: value }),
+    });
+    refreshProfile();
+  }
+
   async function saveNotes(notes: string) {
     if (!conversationId) return;
     await fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}`, {
@@ -228,6 +239,7 @@ export default function InsightsPanel({
             onAttachTag={attachTag}
             onDetachTag={detachTag}
             onSaveNotes={saveNotes}
+            onPatchField={patchField}
             loading={loading}
           />
         )}
@@ -242,6 +254,7 @@ function ProfileTab({
   onAttachTag,
   onDetachTag,
   onSaveNotes,
+  onPatchField,
   loading,
 }: {
   profile: LeadProfile | null;
@@ -249,6 +262,7 @@ function ProfileTab({
   onAttachTag: (id: string) => void;
   onDetachTag: (id: string) => void;
   onSaveNotes: (notes: string) => void;
+  onPatchField: (field: string, value: string | null) => Promise<void>;
   loading: boolean;
 }) {
   const [notes, setNotes] = useState("");
@@ -268,16 +282,26 @@ function ProfileTab({
 
   return (
     <>
-      <Section title="👤 Contacto">
+      <Section title="👤 Contacto" subtitle="click en un valor para editar">
         <div style={{ display: "grid", gap: 6, fontSize: 12 }}>
-          <Row k="Nombre" v={c?.lead_name?.trim() || "—"} />
+          <EditableRow k="Nombre" v={c?.lead_name ?? ""} onSave={(val) => onPatchField("lead_name", val || null)} />
           <Row k="Teléfono" v={profile.conversation.phone} />
-          <Row k="Email" v={c?.email ?? "—"} />
+          <EditableRow k="Email" v={c?.email ?? ""} type="email" onSave={(val) => onPatchField("email", val || null)} />
+          <EditableSelectRow
+            k="Cliente"
+            v={c?.client_type ?? ""}
+            options={[{ v: "", l: "— sin tipo —" }, { v: "ventas", l: "💼 Ventas" }, { v: "soporte", l: "🛟 Soporte" }]}
+            onSave={(val) => onPatchField("client_type", val || null)}
+          />
+          <EditableSelectRow
+            k="Prioridad"
+            v={c?.priority ?? ""}
+            options={[{ v: "", l: "— sin prioridad —" }, { v: "alta", l: "🔥 alta" }, { v: "media", l: "🟡 media" }, { v: "baja", l: "❄️ baja" }]}
+            onSave={(val) => onPatchField("priority", val || null)}
+          />
           <Row k="Origen" v={c?.source ?? "—"} />
           <Row k="UTM" v={[c?.utm_source, c?.utm_medium, c?.utm_campaign].filter(Boolean).join(" / ") || "—"} />
           <Row k="Test score" v={c?.test_score ?? "—"} />
-          <Row k="Cliente" v={c?.client_type ?? "—"} />
-          <Row k="Prioridad" v={c?.priority ?? "—"} />
           <Row k="Total mensajes" v={profile.total_messages} />
         </div>
       </Section>
@@ -428,6 +452,94 @@ function Row({ k, v }: { k: string; v: any }) {
     <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12 }}>
       <span style={{ color: "#888", flexShrink: 0 }}>{k}</span>
       <span style={{ color: "#1a1a2e", textAlign: "right", wordBreak: "break-word" }}>{v ?? "—"}</span>
+    </div>
+  );
+}
+
+function EditableRow({ k, v, type, onSave }: { k: string; v: string; type?: "text" | "email"; onSave: (val: string) => void | Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(v);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setDraft(v); }, [v]);
+
+  if (editing) {
+    return (
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 6, fontSize: 12, alignItems: "center" }}>
+        <span style={{ color: "#888", flexShrink: 0 }}>{k}</span>
+        <input
+          autoFocus
+          type={type === "email" ? "email" : "text"}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Escape") { setDraft(v); setEditing(false); }
+          }}
+          onBlur={async () => {
+            if (draft !== v) {
+              setSaving(true);
+              await onSave(draft);
+              setSaving(false);
+            }
+            setEditing(false);
+          }}
+          style={{ flex: 1, maxWidth: 220, padding: "3px 8px", border: `1px solid ${PURPLE}`, borderRadius: 6, fontSize: 12, outline: "none", fontFamily: "inherit" }}
+        />
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12 }}>
+      <span style={{ color: "#888", flexShrink: 0 }}>{k}</span>
+      <button
+        onClick={() => setEditing(true)}
+        title="Click para editar"
+        style={{
+          color: v?.trim() ? "#1a1a2e" : "#bbb",
+          textAlign: "right", wordBreak: "break-word",
+          background: "transparent", border: "none", cursor: "pointer",
+          padding: "1px 6px", borderRadius: 4, borderBottom: "1px dashed transparent",
+          transition: "all 0.12s", fontFamily: "inherit", fontSize: 12,
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(106,23,140,0.05)"; e.currentTarget.style.borderBottomColor = `${PURPLE}66`; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderBottomColor = "transparent"; }}
+      >
+        {saving ? "⏳ guardando…" : (v?.trim() || "+ añadir")}
+      </button>
+    </div>
+  );
+}
+
+function EditableSelectRow({ k, v, options, onSave }: { k: string; v: string; options: { v: string; l: string }[]; onSave: (val: string) => void | Promise<void> }) {
+  const [saving, setSaving] = useState(false);
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12, alignItems: "center" }}>
+      <span style={{ color: "#888", flexShrink: 0 }}>{k}</span>
+      <select
+        value={v}
+        disabled={saving}
+        onChange={async (e) => {
+          setSaving(true);
+          await onSave(e.target.value);
+          setSaving(false);
+        }}
+        style={{
+          padding: "2px 22px 2px 8px",
+          fontSize: 12,
+          border: "1px solid rgba(0,0,0,0.1)",
+          borderRadius: 6,
+          background: "#fff",
+          color: v ? "#1a1a2e" : "#888",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          appearance: "none",
+          backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%236A178C' d='M5 6L0 0h10z'/%3E%3C/svg%3E\")",
+          backgroundRepeat: "no-repeat",
+          backgroundPosition: "right 8px center",
+        }}
+      >
+        {options.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+      </select>
     </div>
   );
 }
