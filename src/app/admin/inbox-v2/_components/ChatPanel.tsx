@@ -613,7 +613,7 @@ function WindowBanner({ info }: { info: WindowInfo }) {
 
   let cta: React.ReactNode = null;
   if (info.window_status === "expiring_soon") {
-    cta = <span style={{ marginLeft: 8, fontSize: 11, color: c.fg, fontWeight: 600 }}>💡 Generá la sugerencia urgente abajo en el panel derecho →</span>;
+    cta = <span style={{ marginLeft: 8, fontSize: 11, color: c.fg, fontWeight: 600 }}>💡 Generá la estrategia urgente abajo (tú redactás el mensaje) →</span>;
   } else if (info.window_status === "expired") {
     cta = <span style={{ marginLeft: 8, fontSize: 11, color: c.fg, fontWeight: 600 }}>📋 Solo plantillas Meta pueden reactivar esta conversación</span>;
   }

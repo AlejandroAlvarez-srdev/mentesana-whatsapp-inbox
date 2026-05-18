@@ -144,14 +144,14 @@ export default function ExpiringPage() {
                     disabled={suggestionStreaming && suggestionFor === r.conversation_id}
                     style={{ padding: "5px 12px", fontSize: 11.5, fontWeight: 700, background: `${PURPLE}0d`, color: PURPLE, border: `1px solid ${PURPLE}55`, borderRadius: 6, cursor: "pointer" }}
                   >
-                    {suggestionStreaming && suggestionFor === r.conversation_id ? "✨ Generando…" : "✨ Sugerir mensaje (Voyage + Claude)"}
+                    {suggestionStreaming && suggestionFor === r.conversation_id ? "✨ Generando…" : "✨ Sugerir estrategia (Voyage + Claude)"}
                   </button>
                 </div>
               )}
 
               {suggestionFor === r.conversation_id && suggestion && (
                 <div style={{ marginTop: 4, padding: 12, background: "rgba(106,23,140,0.04)", border: "1px solid rgba(106,23,140,0.15)", borderRadius: 8, fontSize: 12.5, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: PURPLE, marginBottom: 6, letterSpacing: 0.5 }}>SUGERENCIA BASADA EN CONVERSACIONES PAGADAS SIMILARES</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: PURPLE, marginBottom: 6, letterSpacing: 0.5 }}>ESTRATEGIA BASADA EN CASOS PAGADOS · TÚ REDACTAS EL MENSAJE</div>
                   <Markdown text={suggestion} />
                 </div>
               )}

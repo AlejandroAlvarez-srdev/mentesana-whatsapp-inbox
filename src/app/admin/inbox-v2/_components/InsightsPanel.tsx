@@ -194,8 +194,8 @@ export default function InsightsPanel({
               {summary ? <Markdown text={summary} /> : !summaryStreaming && <div style={{ color: "#aaa", fontSize: 12 }}>Pulsa &ldquo;Generar&rdquo;.</div>}
             </Section>
             <Section
-              title="💡 Respuesta sugerida (RAG)"
-              subtitle="Cruza con conversaciones pagadas similares"
+              title="💡 Estrategia sugerida (RAG)"
+              subtitle="Ángulos basados en casos pagados · tú redactas el mensaje"
               action={<button onClick={runReply} disabled={replyStreaming} style={btnStyle(replyStreaming)}>{replyStreaming ? "Pensando…" : reply ? "Regenerar" : "Sugerir"}</button>}
             >
               {replyErr && <div style={errBox}>{replyErr}</div>}
