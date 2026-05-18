@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useConversationsRealtime } from "../_hooks/useInboxRealtime";
 
 const PURPLE = "#6A178C";
@@ -48,6 +48,8 @@ export default function ConversationList({
   const reqIdRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const preserveScrollRef = useRef<number | null>(null);
 
   useEffect(() => {
     fetch(`${apiBase}/whatsapp-numbers`, { credentials: "include" })
@@ -59,6 +61,10 @@ export default function ConversationList({
   async function loadList(q: string, opts?: { append?: boolean; silent?: boolean }) {
     const append = opts?.append === true;
     const silent = opts?.silent === true;
+    // Capturar scroll antes de cualquier update (para restaurar en polling/append)
+    if ((silent || append) && scrollRef.current) {
+      preserveScrollRef.current = scrollRef.current.scrollTop;
+    }
     if (abortRef.current) abortRef.current.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -135,20 +141,60 @@ export default function ConversationList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items.length, total, loading, mode]);
 
-  // Polling backup — refresca primera página cada 6s para garantizar que ve mensajes nuevos
-  // (silent: no muestra spinner). En segundo plano sube a 20s.
+  // Restaurar scroll después de re-render si fue marcado para preservar
+  useLayoutEffect(() => {
+    if (preserveScrollRef.current != null && scrollRef.current) {
+      scrollRef.current.scrollTop = preserveScrollRef.current;
+      preserveScrollRef.current = null;
+    }
+  }, [items]);
+
+  // Polling silent — refresca actualizando IN PLACE (preserva scroll, no reordena items existentes).
+  // Solo añade conversaciones nuevas que no estaban y actualiza unread_count / last_message de las existentes.
+  async function silentRefresh() {
+    if (mode === "search") return;
+    if (abortRef.current) abortRef.current.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    try {
+      // Pedimos tantos items como ya tenemos cargados (para que conserve toda la lista visible)
+      const lim = Math.max(PAGE_SIZE, items.length);
+      const params = new URLSearchParams({ limit: String(lim), offset: "0" });
+      if (query.trim() && !query.startsWith("?")) params.set("search", query.trim());
+      if (pipelineFilter) params.set("pipeline", pipelineFilter);
+      if (numberFilter) params.set("phone_number_id", numberFilter);
+      if (unreadOnly) params.set("unread", "true");
+      const r = await fetch(`${apiBase}/conversations?${params}`, { credentials: "include", signal: ac.signal });
+      if (!r.ok) return;
+      const d = await r.json();
+      const fresh: ConvSummary[] = d.conversations ?? [];
+      const total: number = d.total ?? fresh.length;
+      // Merge in place: conservar orden actual, actualizar unread_count / last_message si cambió, añadir nuevos al inicio
+      setItems((prev) => {
+        const freshById = new Map(fresh.map((c) => [c.id, c]));
+        const prevIds = new Set(prev.map((c) => c.id));
+        // Actualizar in place los que ya estaban
+        const merged = prev.map((c) => freshById.get(c.id) ?? c);
+        // Añadir los nuevos (que no estaban) al principio en el orden que vienen
+        const newOnes = fresh.filter((c) => !prevIds.has(c.id));
+        return newOnes.length > 0 ? [...newOnes, ...merged] : merged;
+      });
+      setTotal(total);
+    } catch { /* ignore */ }
+  }
+
   useEffect(() => {
     if (mode === "search") return;
     let interval = 6000;
-    let iv: any = setInterval(() => { void loadList(query, { silent: true }); }, interval);
+    let iv: any = setInterval(silentRefresh, interval);
     const onVis = () => {
       const ni = document.hidden ? 20000 : 6000;
-      if (ni !== interval) { interval = ni; clearInterval(iv); iv = setInterval(() => { void loadList(query, { silent: true }); }, ni); if (!document.hidden) void loadList(query, { silent: true }); }
+      if (ni !== interval) { interval = ni; clearInterval(iv); iv = setInterval(silentRefresh, ni); if (!document.hidden) void silentRefresh(); }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, pipelineFilter, numberFilter, unreadOnly, mode]);
+  }, [query, pipelineFilter, numberFilter, unreadOnly, mode, items.length]);
 
   // Realtime: cuando una conversación cambia (nuevo mensaje del lead, status,
   // unread_count, asignación), refrescamos la lista actual sin recargar todo
@@ -233,7 +279,7 @@ export default function ConversationList({
       {err && (
         <div style={{ padding: 10, fontSize: 12, color: "#900", background: "#fee", borderBottom: "1px solid #fcc" }}>{err}</div>
       )}
-      <div style={{ flex: 1, overflowY: "auto" }}>
+      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto" }}>
         {items.length === 0 && !loading && (
           <div style={{ padding: 24, textAlign: "center", color: "#aaa", fontSize: 12 }}>Sin resultados</div>
         )}
@@ -414,15 +460,21 @@ function colorFromString(s: string): string {
   return palette[Math.abs(h) % palette.length];
 }
 
+// Hora siempre en horario España (Europe/Madrid) — nunca "ahora" / "now"
 function fmtRel(iso: string): string {
   const d = new Date(iso);
-  const diff = Date.now() - d.getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return "ahora";
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  const dd = Math.floor(h / 24);
-  if (dd < 30) return `${dd}d`;
-  return d.toLocaleDateString("es-ES", { day: "2-digit", month: "short" });
+  const now = new Date();
+  const tz = "Europe/Madrid";
+  const sameDay = d.toLocaleDateString("es-ES", { timeZone: tz }) === now.toLocaleDateString("es-ES", { timeZone: tz });
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const isYesterday = d.toLocaleDateString("es-ES", { timeZone: tz }) === yesterday.toLocaleDateString("es-ES", { timeZone: tz });
+  const hhmm = d.toLocaleTimeString("es-ES", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false });
+  if (sameDay) return hhmm;
+  if (isYesterday) return `ayer ${hhmm}`;
+  const diffDays = Math.floor((now.getTime() - d.getTime()) / (24 * 60 * 60 * 1000));
+  if (diffDays < 7) {
+    const dow = d.toLocaleDateString("es-ES", { timeZone: tz, weekday: "short" }).replace(".", "");
+    return `${dow} ${hhmm}`;
+  }
+  return d.toLocaleDateString("es-ES", { timeZone: tz, day: "2-digit", month: "short" }) + ` ${hhmm}`;
 }

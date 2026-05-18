@@ -196,8 +196,17 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
     return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
   }, [conversationId, apiBase]);
 
+  // Auto-scroll al fondo del chat — SOLO si el usuario ya estaba cerca del fondo (no rompe lectura).
+  const lastScrollHeightRef = useRef(0);
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    // Si estaba cerca del fondo (<120px) o es la carga inicial, hace scroll al fondo
+    if (distanceFromBottom < 120 || lastScrollHeightRef.current === 0) {
+      el.scrollTop = el.scrollHeight;
+    }
+    lastScrollHeightRef.current = el.scrollHeight;
   }, [messages.length]);
 
   async function patchConv(patch: Partial<Conversation>) {
@@ -701,9 +710,10 @@ function Tag({ label, color, solid }: { label: string; color: string; solid?: bo
   return <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 700, background: solid ? color : `${color}1a`, color: solid ? "#fff" : color, textTransform: "uppercase" }}>{label}</span>;
 }
 
+// Siempre hora España (Europe/Madrid)
 function fmtTime(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleString("es-ES", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 const emptyStyle: React.CSSProperties = { background: "#fff", borderRadius: 12, border: "1px solid rgba(0,0,0,0.06)", display: "flex", alignItems: "center", justifyContent: "center" };
