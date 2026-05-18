@@ -1,0 +1,180 @@
+/* MenteSana · Inbox v2 design tokens & brand styles
+   ---
+   Brand fonts: Inter (sans), Playfair (serif), Caveat (handwriting) — ya cargadas en layout raíz como --font-inter, --font-playfair, --font-caveat
+   Brand colors: --color-purple #6A178C, salmon #fa8072, cream #FFFAF2, sage #7A9B6C
+*/
+
+[data-inbox-v2],
+[data-inbox-v2] * {
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+[data-inbox-v2] button,
+[data-inbox-v2] input,
+[data-inbox-v2] textarea,
+[data-inbox-v2] select {
+  font-family: inherit;
+  letter-spacing: -0.005em;
+}
+
+[data-inbox-v2] {
+  --ms-purple: #6A178C;
+  --ms-purple-dark: #5a1276;
+  --ms-purple-50: #F8F6F9;
+  --ms-purple-100: rgba(106, 23, 140, 0.08);
+  --ms-purple-200: rgba(106, 23, 140, 0.16);
+  --ms-salmon: #fa8072;
+  --ms-cream: #FFFAF2;
+  --ms-sage: #7A9B6C;
+  --ms-amber: #d97706;
+  --ms-amber-soft: rgba(245, 158, 11, 0.12);
+  --ms-ink: #1a1a2e;
+  --ms-ink-soft: #475569;
+  --ms-line: rgba(0, 0, 0, 0.06);
+  --ms-line-soft: rgba(0, 0, 0, 0.04);
+  --ms-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --ms-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.06);
+  --ms-shadow-lg: 0 12px 32px rgba(106, 23, 140, 0.18);
+  --ms-radius-sm: 8px;
+  --ms-radius: 12px;
+  --ms-radius-lg: 14px;
+}
+
+/* Hover row */
+[data-inbox-v2] .ms-conv-row:hover {
+  background: rgba(106, 23, 140, 0.04) !important;
+}
+
+/* Buttons */
+[data-inbox-v2] .ms-btn-primary {
+  background: var(--ms-purple);
+  color: #fff;
+  border: none;
+  padding: 9px 16px;
+  border-radius: var(--ms-radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.05s;
+}
+[data-inbox-v2] .ms-btn-primary:hover { background: var(--ms-purple-dark); }
+[data-inbox-v2] .ms-btn-primary:active { transform: translateY(1px); }
+[data-inbox-v2] .ms-btn-primary:disabled { background: rgba(0,0,0,0.08); color: #888; cursor: default; }
+
+[data-inbox-v2] .ms-btn-ghost {
+  background: transparent;
+  color: var(--ms-ink-soft);
+  border: 1px solid var(--ms-line);
+  padding: 7px 12px;
+  border-radius: var(--ms-radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+[data-inbox-v2] .ms-btn-ghost:hover { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.12); }
+
+/* Inputs */
+[data-inbox-v2] .ms-input,
+[data-inbox-v2] .ms-select,
+[data-inbox-v2] .ms-textarea {
+  padding: 9px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: var(--ms-radius-sm);
+  font-size: 13px;
+  background: #fff;
+  color: var(--ms-ink);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+[data-inbox-v2] .ms-input:focus,
+[data-inbox-v2] .ms-select:focus,
+[data-inbox-v2] .ms-textarea:focus {
+  border-color: var(--ms-purple);
+  box-shadow: 0 0 0 3px rgba(106, 23, 140, 0.12);
+}
+
+/* Card */
+[data-inbox-v2] .ms-card {
+  background: #fff;
+  border: 1px solid var(--ms-line);
+  border-radius: var(--ms-radius-lg);
+  box-shadow: var(--ms-shadow-sm);
+}
+
+/* Skeleton loader */
+@keyframes ms-skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+[data-inbox-v2] .ms-skeleton {
+  background: linear-gradient(90deg, rgba(0,0,0,0.04) 0%, rgba(0,0,0,0.08) 50%, rgba(0,0,0,0.04) 100%);
+  background-size: 200% 100%;
+  animation: ms-skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+/* Custom scrollbar inside inbox */
+[data-inbox-v2] ::-webkit-scrollbar { width: 8px; height: 8px; }
+[data-inbox-v2] ::-webkit-scrollbar-track { background: transparent; }
+[data-inbox-v2] ::-webkit-scrollbar-thumb { background: rgba(106, 23, 140, 0.15); border-radius: 4px; }
+[data-inbox-v2] ::-webkit-scrollbar-thumb:hover { background: rgba(106, 23, 140, 0.3); }
+
+/* Modal overlay branded */
+[data-inbox-v2] .ms-modal-backdrop {
+  background: rgba(26, 26, 46, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+[data-inbox-v2] .ms-modal {
+  background: var(--ms-cream);
+  border-radius: 18px;
+  box-shadow: var(--ms-shadow-lg);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+/* Reduce minimum height on buttons inside inbox (override admin global rule that
+   forces 44px on mobile — that breaks the dense list rows) */
+@media (max-width: 640px) {
+  [data-inbox-v2] button,
+  [data-inbox-v2] select {
+    min-height: 0;
+  }
+  [data-inbox-v2] .ms-conv-row,
+  [data-inbox-v2] .ms-touch {
+    min-height: 56px;
+  }
+}
+
+/* Fade transitions */
+@keyframes ms-fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes ms-slide-up { from { transform: translateY(8px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
+
+[data-inbox-v2] .ms-fade-in { animation: ms-fade-in 0.2s ease-out; }
+[data-inbox-v2] .ms-slide-up { animation: ms-slide-up 0.22s ease-out; }
+
+/* Pretty selects */
+[data-inbox-v2] select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%236A178C' d='M5 6L0 0h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 26px;
+}
+
+/* Loading dots */
+@keyframes ms-blink { 0%, 80%, 100% { opacity: 0.2 } 40% { opacity: 1 } }
+[data-inbox-v2] .ms-dots span {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 2px;
+  border-radius: 50%;
+  background: var(--ms-purple);
+  animation: ms-blink 1.4s infinite both;
+}
+[data-inbox-v2] .ms-dots span:nth-child(2) { animation-delay: 0.18s; }
+[data-inbox-v2] .ms-dots span:nth-child(3) { animation-delay: 0.36s; }

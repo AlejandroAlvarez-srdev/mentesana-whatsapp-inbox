@@ -299,6 +299,13 @@ export default function TemplatesModal({
 
         {loadErr && <div style={errBox}>{loadErr}</div>}
 
+        {open && !loadErr && templates.length === 0 && numbers.length === 0 && (
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, color: "#6A178C", fontSize: 13, fontWeight: 600 }}>
+            <span className="ms-dots"><span /><span /><span /></span>
+            Cargando plantillas Meta…
+          </div>
+        )}
+
         {/* Body 3 columns: left = list, middle = preview, right = actions */}
         <div style={{ display: "grid", gridTemplateColumns: "320px 1fr 360px", gap: 0, flex: 1, minHeight: 0 }}>
           {/* LEFT — list */}
@@ -619,8 +626,8 @@ function TabBtn({ cur, v, set, label, disabled }: { cur: Mode; v: Mode; set: (v:
   );
 }
 
-const overlayStyle: React.CSSProperties = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 16 };
-const modalStyle: React.CSSProperties = { background: "#fff", borderRadius: 16, width: "min(1180px, 100%)", height: "min(760px, 95vh)", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 80px rgba(0,0,0,0.25)" };
+const overlayStyle: React.CSSProperties = { position: "fixed", inset: 0, background: "rgba(26,26,46,0.45)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 16, animation: "ms-fade-in 0.18s ease-out" };
+const modalStyle: React.CSSProperties = { background: "#FFFAF2", borderRadius: 18, width: "min(1180px, 100%)", height: "min(760px, 95vh)", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 80px rgba(106,23,140,0.22)", animation: "ms-slide-up 0.22s ease-out" };
 const errBox: React.CSSProperties = { padding: 10, margin: "10px 20px", background: "#fef2f2", border: "1px solid #fecaca", color: "#991b1b", fontSize: 12, borderRadius: 8 };
 const lblStyle: React.CSSProperties = { fontSize: 10, color: "#888", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 3, display: "block" };
 const inputStyle: React.CSSProperties = { width: "100%", padding: "7px 10px", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6, fontSize: 12, boxSizing: "border-box" };
