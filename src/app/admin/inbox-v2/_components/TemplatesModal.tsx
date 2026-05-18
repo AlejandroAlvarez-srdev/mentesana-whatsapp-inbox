@@ -455,13 +455,16 @@ export default function TemplatesModal({
                   placeholder={personalize ? bulkPersonalizedPlaceholder(expectedVarsPerLine) : "34XXXXXXXXX, 34XXXXXXXXX\n34611111111"}
                   style={{ ...inputStyle, fontFamily: "ui-monospace, monospace", resize: "vertical", minHeight: 110 }}
                 />
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4, marginBottom: 8, fontSize: 11 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4, marginBottom: 8, fontSize: 11, flexWrap: "wrap", gap: 6 }}>
                   <span style={{ color: validRecipientsCount > 500 ? "#dc2626" : "#666" }}>
                     <strong style={{ color: validRecipientsCount > 500 ? "#dc2626" : "#059669" }}>{validRecipientsCount}</strong> válid{validRecipientsCount === 1 ? "o" : "os"}
                     {invalidRecipientsCount > 0 && <span style={{ color: "#dc2626" }}> · {invalidRecipientsCount} con error</span>}
                     {validRecipientsCount > 500 && " (máx 500)"}
                   </span>
-                  <button onClick={() => setBulkInput("")} style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", fontSize: 11 }}>Limpiar</button>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <ImportFromInboxButton apiBase={apiBase} fromNumberId={fromNumberId} onImport={(phones) => setBulkInput((prev) => (prev.trim() ? prev.trim() + "\n" : "") + phones.join("\n"))} disabled={personalize} />
+                    <button onClick={() => setBulkInput("")} style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", fontSize: 11 }}>Limpiar</button>
+                  </div>
                 </div>
 
                 {personalize && invalidRecipientsCount > 0 && (
@@ -622,3 +625,97 @@ const errBox: React.CSSProperties = { padding: 10, margin: "10px 20px", backgrou
 const lblStyle: React.CSSProperties = { fontSize: 10, color: "#888", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 3, display: "block" };
 const inputStyle: React.CSSProperties = { width: "100%", padding: "7px 10px", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6, fontSize: 12, boxSizing: "border-box" };
 const primaryBtn = (disabled: boolean): React.CSSProperties => ({ padding: "11px 18px", borderRadius: 8, border: "none", background: disabled ? "rgba(0,0,0,0.06)" : PURPLE, color: disabled ? "#888" : "#fff", fontSize: 13, fontWeight: 700, cursor: disabled ? "default" : "pointer" });
+
+function ImportFromInboxButton({ apiBase, fromNumberId, onImport, disabled }: { apiBase: string; fromNumberId: string; onImport: (phones: string[]) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [status, setStatus] = useState("");
+  const [clientType, setClientType] = useState("");
+  const [paidOnly, setPaidOnly] = useState(false);
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  const [previewCount, setPreviewCount] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function fetchPhones(preview: boolean) {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: preview ? "1" : "500" });
+      if (status) params.set("status", status);
+      if (clientType) params.set("client_type", clientType);
+      if (paidOnly) params.set("paid", "true");
+      if (unreadOnly) params.set("unread", "true");
+      if (fromNumberId) params.set("phone_number_id", fromNumberId);
+      const r = await fetch(`${apiBase}/conversations?${params}`, { credentials: "include" });
+      if (!r.ok) return null;
+      const d = await r.json();
+      if (preview) { setPreviewCount(d.total ?? 0); return null; }
+      return (d.conversations ?? []).map((c: any) => c.phone).filter(Boolean);
+    } finally { setLoading(false); }
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    void fetchPhones(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, status, clientType, paidOnly, unreadOnly, fromNumberId]);
+
+  async function doImport() {
+    const phones = await fetchPhones(false);
+    if (!phones || phones.length === 0) return;
+    onImport(phones);
+    setOpen(false);
+  }
+
+  if (disabled) return null;
+
+  return (
+    <>
+      <button onClick={() => setOpen(true)} style={{ background: "transparent", border: `1px solid ${PURPLE}55`, color: PURPLE, padding: "3px 9px", borderRadius: 6, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+        📥 Importar del inbox
+      </button>
+      {open && (
+        <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 22, width: "min(460px, 100%)" }}>
+            <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 700, color: "#1a1a2e" }}>📥 Importar destinatarios</h3>
+            <p style={{ fontSize: 12, color: "#888", margin: "0 0 14px" }}>Filtra conversaciones del inbox{fromNumberId ? " del número seleccionado" : ""} y añade sus teléfonos a la lista. Hasta 500.</p>
+            <div style={{ display: "grid", gap: 10, fontSize: 12 }}>
+              <label style={{ display: "grid", gap: 4 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#888", textTransform: "uppercase" }}>Estado</span>
+                <select value={status} onChange={(e) => setStatus(e.target.value)} style={inputStyle}>
+                  <option value="">Todos</option>
+                  <option value="nuevo">Nuevo</option>
+                  <option value="contactado">Contactado</option>
+                  <option value="asignado">Asignado</option>
+                  <option value="pagado">Pagado</option>
+                  <option value="cerrado">Cerrado</option>
+                </select>
+              </label>
+              <label style={{ display: "grid", gap: 4 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#888", textTransform: "uppercase" }}>Tipo cliente</span>
+                <select value={clientType} onChange={(e) => setClientType(e.target.value)} style={inputStyle}>
+                  <option value="">Todos</option>
+                  <option value="ventas">Ventas</option>
+                  <option value="soporte">Soporte</option>
+                </select>
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input type="checkbox" checked={paidOnly} onChange={(e) => setPaidOnly(e.target.checked)} /> Solo pagadas
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input type="checkbox" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} /> Solo con mensajes sin responder
+              </label>
+            </div>
+            <div style={{ marginTop: 14, padding: 10, background: "rgba(106,23,140,0.06)", borderRadius: 8, fontSize: 13, color: "#1a1a2e", textAlign: "center" }}>
+              {loading ? "Contando…" : previewCount != null ? <><strong style={{ color: PURPLE, fontSize: 18 }}>{previewCount}</strong> conversaciones coinciden ({Math.min(previewCount ?? 0, 500)} se importarán)</> : "—"}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+              <button onClick={() => setOpen(false)} style={{ padding: "10px 14px", background: "transparent", color: "#666", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>Cancelar</button>
+              <button onClick={doImport} disabled={loading || (previewCount ?? 0) === 0} style={{ flex: 1, padding: "10px 14px", background: PURPLE, color: "#fff", border: "none", borderRadius: 8, cursor: loading ? "default" : "pointer", fontSize: 12, fontWeight: 700, opacity: loading || (previewCount ?? 0) === 0 ? 0.5 : 1 }}>
+                {loading ? "Importando…" : `Añadir ${Math.min(previewCount ?? 0, 500)} teléfonos`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

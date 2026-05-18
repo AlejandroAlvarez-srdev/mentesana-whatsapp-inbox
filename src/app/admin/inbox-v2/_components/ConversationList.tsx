@@ -40,7 +40,16 @@ export default function ConversationList({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pipelineFilter, setPipelineFilter] = useState<"" | "ventas" | "soporte">("");
+  const [numberFilter, setNumberFilter] = useState("");
+  const [waNumbers, setWaNumbers] = useState<{ phone_number_id: string; name: string; phone_number: string | null }[]>([]);
   const debounceRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    fetch(`${apiBase}/whatsapp-numbers`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { numbers: [] }))
+      .then((d) => setWaNumbers((d.numbers ?? []).filter((n: any) => !n.is_pdf_number)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function loadList(q: string) {
     setLoading(true);
@@ -77,6 +86,7 @@ export default function ConversationList({
           setMode("list");
           const params = new URLSearchParams({ search: q, limit: "30" });
           if (pipelineFilter) params.set("pipeline", pipelineFilter);
+          if (numberFilter) params.set("phone_number_id", numberFilter);
           const r = await fetch(`${apiBase}/conversations?${params}`, { credentials: "include" });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           const d = await r.json();
@@ -87,6 +97,7 @@ export default function ConversationList({
         setMode("list");
         const params = new URLSearchParams({ limit: "30" });
         if (pipelineFilter) params.set("pipeline", pipelineFilter);
+        if (numberFilter) params.set("phone_number_id", numberFilter);
         const r = await fetch(`${apiBase}/conversations?${params}`, { credentials: "include" });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const d = await r.json();
@@ -110,7 +121,7 @@ export default function ConversationList({
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, pipelineFilter]);
+  }, [query, pipelineFilter, numberFilter]);
 
   // Realtime: cuando una conversación cambia (nuevo mensaje del lead, status,
   // unread_count, asignación), refrescamos la lista actual sin recargar todo
@@ -154,7 +165,7 @@ export default function ConversationList({
             boxSizing: "border-box",
           }}
         />
-        <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
           <PipelinePill v="" cur={pipelineFilter} set={setPipelineFilter} label="Todas" />
           <PipelinePill v="ventas" cur={pipelineFilter} set={setPipelineFilter} label="Ventas" />
           <PipelinePill v="soporte" cur={pipelineFilter} set={setPipelineFilter} label="Soporte" />
@@ -162,6 +173,18 @@ export default function ConversationList({
             {loading ? "…" : `${items.length}${total ? ` / ${total.toLocaleString()}` : ""}`}
           </span>
         </div>
+        {waNumbers.length > 1 && (
+          <select
+            value={numberFilter}
+            onChange={(e) => setNumberFilter(e.target.value)}
+            style={{ width: "100%", marginTop: 6, padding: "5px 8px", fontSize: 11, border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6, background: numberFilter ? "rgba(106,23,140,0.06)" : "#fff" }}
+          >
+            <option value="">📱 Todos los números</option>
+            {waNumbers.map((n) => (
+              <option key={n.phone_number_id} value={n.phone_number_id}>{n.name?.trim()} {n.phone_number ? `· ${n.phone_number}` : ""}</option>
+            ))}
+          </select>
+        )}
       </div>
       {err && (
         <div style={{ padding: 10, fontSize: 12, color: "#900", background: "#fee", borderBottom: "1px solid #fcc" }}>{err}</div>

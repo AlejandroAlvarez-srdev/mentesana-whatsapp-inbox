@@ -42,6 +42,8 @@ type Conversation = {
 
 type Agent = { id: string; name: string; email: string; agent_type: string | null };
 type TagItem = { id: string; name: string; color: string };
+type Psychologist = { id: string; name: string; specialty: string | null; years_experience: number | null; current_patients: number | null; max_patients: number | null; is_accepting_patients: boolean };
+type QuickReply = { id: string; title: string; content: string; shortcut: string | null; usage_count: number };
 
 const STATUSES = ["nuevo", "contactado", "asignado", "pagado", "cerrado"] as const;
 
@@ -52,6 +54,8 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   const [err, setErr] = useState<string | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tags, setTags] = useState<TagItem[]>([]);
+  const [psychologists, setPsychologists] = useState<Psychologist[]>([]);
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
   const [tplOpen, setTplOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastMsgTsRef = useRef<string | null>(null);
@@ -89,9 +93,13 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
     Promise.all([
       fetch(`${apiBase}/agents`, { credentials: "include" }).then((r) => (r.ok ? r.json() : { agents: [] })),
       fetch(`${apiBase}/tags`, { credentials: "include" }).then((r) => (r.ok ? r.json() : { tags: [] })),
-    ]).then(([a, g]) => {
+      fetch(`${apiBase}/psychologists`, { credentials: "include" }).then((r) => (r.ok ? r.json() : { psychologists: [] })),
+      fetch(`${apiBase}/quick-replies`, { credentials: "include" }).then((r) => (r.ok ? r.json() : { quick_replies: [] })),
+    ]).then(([a, g, p, q]) => {
       setAgents(a.agents ?? []);
       setTags(g.tags ?? []);
+      setPsychologists(p.psychologists ?? []);
+      setQuickReplies(q.quick_replies ?? []);
     });
   }, []);
 
@@ -224,19 +232,41 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
           ))}
         </select>
 
-        {/* Assigned */}
+        {/* Assigned agent */}
         <select
           value={conv.assigned_to ?? ""}
           onChange={(e) => patchConv({ assigned_to: e.target.value || null })}
           style={selectStyle}
-          title="Asignado"
+          title="Asignado a agente"
         >
-          <option value="">— asignar —</option>
+          <option value="">— agente —</option>
           {agents.map((a) => (
             <option key={a.id} value={a.id}>
               {a.name?.trim()} {a.agent_type ? `· ${a.agent_type}` : ""}
             </option>
           ))}
+        </select>
+
+        {/* Assigned psychologist */}
+        <select
+          value={(conv as any).assigned_psychologist ?? ""}
+          onChange={(e) => {
+            const psyId = e.target.value || null;
+            const psy = psychologists.find((p) => p.id === psyId);
+            patchConv({ assigned_psychologist: psyId, assigned_psychologist_name: psy?.name ?? null } as any);
+          }}
+          style={selectStyle}
+          title="Psicóloga asignada"
+        >
+          <option value="">— psicóloga —</option>
+          {psychologists.map((p) => {
+            const full = p.current_patients != null && p.max_patients != null && p.current_patients >= p.max_patients;
+            return (
+              <option key={p.id} value={p.id} disabled={!p.is_accepting_patients}>
+                {p.name?.trim()}{p.specialty ? ` · ${p.specialty}` : ""}{p.current_patients != null && p.max_patients != null ? ` (${p.current_patients}/${p.max_patients})` : ""}{full ? " ⚠️" : ""}
+              </option>
+            );
+          })}
         </select>
       </div>
 
@@ -247,7 +277,7 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
       </div>
 
       {/* Compose */}
-      <Composer onSend={send} onOpenTemplates={() => setTplOpen(true)} />
+      <Composer onSend={send} onOpenTemplates={() => setTplOpen(true)} quickReplies={quickReplies} />
       {err && <div style={{ padding: "6px 14px", fontSize: 11, color: "#900", background: "#fee" }}>{err}</div>}
 
       <TemplatesModal
@@ -264,10 +294,27 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   );
 }
 
-function Composer({ onSend, onOpenTemplates }: { onSend: (text: string) => Promise<void>; onOpenTemplates: () => void }) {
+function Composer({ onSend, onOpenTemplates, quickReplies }: { onSend: (text: string) => Promise<void>; onOpenTemplates: () => void; quickReplies: QuickReply[] }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrQuery, setQrQuery] = useState("");
+  const [qrIdx, setQrIdx] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Filtra quick replies por shortcut o título
+  const matches = (() => {
+    const q = qrQuery.toLowerCase();
+    if (!q) return quickReplies.slice(0, 10);
+    return quickReplies.filter((qr) => (qr.shortcut ?? "").toLowerCase().includes(q) || (qr.title ?? "").toLowerCase().includes(q)).slice(0, 10);
+  })();
+
+  function applyQuickReply(qr: QuickReply) {
+    setText(qr.content);
+    setQrOpen(false);
+    setQrQuery("");
+    inputRef.current?.focus();
+  }
 
   async function handleSend() {
     if (!text.trim() || sending) return;
@@ -278,8 +325,43 @@ function Composer({ onSend, onOpenTemplates }: { onSend: (text: string) => Promi
     inputRef.current?.focus();
   }
 
+  // Detecta cuando el textarea contiene solo "/xxx" → abre popup de quick replies
+  function onTextChange(v: string) {
+    setText(v);
+    const trimmed = v.trim();
+    if (trimmed.startsWith("/") && !trimmed.includes("\n") && trimmed.length < 50) {
+      setQrOpen(true);
+      setQrQuery(trimmed.slice(1));
+      setQrIdx(0);
+    } else if (qrOpen && !trimmed.startsWith("/")) {
+      setQrOpen(false);
+    }
+  }
+
   return (
-    <div style={{ borderTop: "1px solid rgba(0,0,0,0.06)", padding: "10px 12px", background: "#fff" }}>
+    <div style={{ borderTop: "1px solid rgba(0,0,0,0.06)", padding: "10px 12px", background: "#fff", position: "relative" }}>
+      {qrOpen && matches.length > 0 && (
+        <div style={{ position: "absolute", bottom: 78, left: 12, right: 12, background: "#fff", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.12)", maxHeight: 320, overflowY: "auto", zIndex: 10 }}>
+          <div style={{ padding: "6px 12px", fontSize: 10, color: "#888", fontWeight: 700, letterSpacing: 0.5, borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
+            {matches.length} respuesta{matches.length === 1 ? "" : "s"} rápida{matches.length === 1 ? "" : "s"} · Enter para insertar
+          </div>
+          {matches.map((qr, i) => (
+            <button
+              key={qr.id}
+              onClick={() => applyQuickReply(qr)}
+              onMouseEnter={() => setQrIdx(i)}
+              style={{ width: "100%", textAlign: "left", padding: "10px 12px", background: i === qrIdx ? "rgba(106,23,140,0.06)" : "transparent", border: "none", borderBottom: "1px solid rgba(0,0,0,0.03)", cursor: "pointer", display: "flex", flexDirection: "column", gap: 3 }}
+            >
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <span style={{ fontFamily: "ui-monospace, monospace", color: PURPLE, fontSize: 11, fontWeight: 700 }}>{qr.shortcut ?? "—"}</span>
+                <strong style={{ fontSize: 12.5, color: "#1a1a2e" }}>{qr.title}</strong>
+                <span style={{ marginLeft: "auto", fontSize: 10, color: "#aaa" }}>×{qr.usage_count}</span>
+              </div>
+              <div style={{ fontSize: 11, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{qr.content.slice(0, 110)}</div>
+            </button>
+          ))}
+        </div>
+      )}
       <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
         <button
           onClick={onOpenTemplates}
@@ -291,14 +373,20 @@ function Composer({ onSend, onOpenTemplates }: { onSend: (text: string) => Promi
         <textarea
           ref={inputRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => onTextChange(e.target.value)}
           onKeyDown={(e) => {
+            if (qrOpen && matches.length > 0) {
+              if (e.key === "ArrowDown") { e.preventDefault(); setQrIdx((i) => Math.min(i + 1, matches.length - 1)); return; }
+              if (e.key === "ArrowUp") { e.preventDefault(); setQrIdx((i) => Math.max(i - 1, 0)); return; }
+              if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) { e.preventDefault(); applyQuickReply(matches[qrIdx]); return; }
+              if (e.key === "Escape") { e.preventDefault(); setQrOpen(false); return; }
+            }
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
               e.preventDefault();
               void handleSend();
             }
           }}
-          placeholder="Escribe el mensaje… (Cmd/Ctrl+Enter para enviar)"
+          placeholder="Escribe el mensaje… (Cmd/Ctrl+Enter para enviar · '/' para respuestas rápidas)"
           rows={2}
           style={{ flex: 1, padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.1)", fontSize: 13, resize: "none", outline: "none", fontFamily: "inherit" }}
         />
