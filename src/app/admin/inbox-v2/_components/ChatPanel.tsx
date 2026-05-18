@@ -66,6 +66,7 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [savingSale, setSavingSale] = useState(false);
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
 
   const loadFull = useCallback(async () => {
     if (!conversationId) return;
@@ -438,6 +439,24 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
           >🛟 Soporte</button>
         </div>
 
+        {/* Cobrar — genera link Stripe y opcionalmente lo envía por WhatsApp */}
+        <button
+          type="button"
+          onClick={() => setPaymentModalOpen(true)}
+          title="Generar link de pago Stripe"
+          style={{
+            padding: "5px 11px",
+            fontSize: 11,
+            fontWeight: 800,
+            borderRadius: 6,
+            border: "none",
+            cursor: "pointer",
+            background: "linear-gradient(135deg, #635bff 0%, #4f46e5 100%)",
+            color: "#fff",
+            letterSpacing: 0.3,
+          }}
+        >💳 Cobrar</button>
+
         {/* Marcar como vendida */}
         {!(conv.purchase_status === "pagado" || conv.paid_at || conv.status === "pagado") ? (
           <button
@@ -573,6 +592,15 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
           void loadFull();
         }}
       />
+
+      {paymentModalOpen && conversationId && (
+        <PaymentLinkModal
+          conversationId={conversationId}
+          leadName={conv.lead_name}
+          onClose={() => setPaymentModalOpen(false)}
+          onSent={() => { setPaymentModalOpen(false); void loadFull(); }}
+        />
+      )}
     </div>
   );
 }
@@ -779,6 +807,129 @@ function Bubble({ m }: { m: Message }) {
           {fmtTime(m.timestamp)}
           {m.status && <span> · {m.status}</span>}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function PaymentLinkModal({
+  conversationId,
+  leadName,
+  onClose,
+  onSent,
+}: {
+  conversationId: string;
+  leadName: string | null;
+  onClose: () => void;
+  onSent: () => void;
+}) {
+  const [amount, setAmount] = useState("9.99");
+  const [description, setDescription] = useState(`Sesión MenteSana${leadName ? ` · ${leadName.trim()}` : ""}`);
+  const [sendByWhatsapp, setSendByWhatsapp] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function create() {
+    const eur = Number(amount.replace(",", "."));
+    if (!eur || isNaN(eur) || eur < 1) { setErr("Importe inválido (mínimo 1€)"); return; }
+    setLoading(true);
+    setErr(null);
+    try {
+      const r = await fetch("/api/agent/inbox-payment-link", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount_eur: eur,
+          description,
+          conversation_id: conversationId,
+          send: sendByWhatsapp,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.detail || d.error || `HTTP ${r.status}`); return; }
+      setResult(d);
+      if (sendByWhatsapp) setTimeout(onSent, 1500);
+    } catch (e: any) {
+      setErr(String(e?.message ?? e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(26,26,46,0.5)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#FFFAF2", borderRadius: 16, width: "min(440px, 100%)", maxHeight: "90vh", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.25)" }}>
+        <header style={{ padding: "16px 20px", background: "linear-gradient(135deg, #635bff 0%, #4f46e5 100%)", color: "#fff", display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 22 }}>💳</span>
+          <strong style={{ fontSize: 16 }}>Generar link de pago</strong>
+          <button onClick={onClose} style={{ marginLeft: "auto", background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", width: 30, height: 30, borderRadius: 8, fontSize: 18, cursor: "pointer" }}>×</button>
+        </header>
+
+        {result ? (
+          <div style={{ padding: 20 }}>
+            <div style={{ padding: 14, background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, fontSize: 13, color: "#065f46", marginBottom: 14 }}>
+              ✅ Link creado{result.sent?.ok ? " y enviado por WhatsApp" : ""}
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", marginBottom: 4 }}>Link público:</div>
+            <a href={result.payment_link.url} target="_blank" rel="noopener noreferrer" style={{ display: "block", padding: 10, background: "#fff", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 8, fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#635bff", wordBreak: "break-all", textDecoration: "none", marginBottom: 14 }}>
+              {result.payment_link.url}
+            </a>
+            <button
+              onClick={() => navigator.clipboard.writeText(result.payment_link.url)}
+              style={{ width: "100%", padding: "10px 14px", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+            >📋 Copiar link</button>
+          </div>
+        ) : (
+          <div style={{ padding: 20, display: "grid", gap: 14 }}>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.5 }}>Importe (€)</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                style={{ padding: "12px 14px", fontSize: 22, fontWeight: 700, color: "#1a1a2e", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 10, fontFamily: "inherit", outline: "none", background: "#fff" }}
+              />
+            </label>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.5 }}>Descripción</span>
+              <input
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                style={{ padding: "10px 12px", fontSize: 13, border: "1px solid rgba(0,0,0,0.1)", borderRadius: 8, fontFamily: "inherit", outline: "none", background: "#fff" }}
+              />
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer", padding: 10, background: "rgba(106,23,140,0.04)", borderRadius: 8 }}>
+              <input type="checkbox" checked={sendByWhatsapp} onChange={(e) => setSendByWhatsapp(e.target.checked)} style={{ accentColor: "#6A178C" }} />
+              <span style={{ fontSize: 12.5 }}>Enviar el link por WhatsApp al lead automáticamente</span>
+            </label>
+            {err && <div style={{ padding: 10, background: "#fef2f2", border: "1px solid #fecaca", color: "#991b1b", fontSize: 12, borderRadius: 8 }}>{err}</div>}
+            <button
+              onClick={create}
+              disabled={loading}
+              style={{
+                padding: "12px 20px",
+                background: loading ? "rgba(0,0,0,0.1)" : "linear-gradient(135deg, #635bff 0%, #4f46e5 100%)",
+                color: "#fff",
+                border: "none",
+                borderRadius: 10,
+                fontSize: 14,
+                fontWeight: 800,
+                cursor: loading ? "default" : "pointer",
+                fontFamily: "inherit",
+                boxShadow: loading ? "none" : "0 4px 14px rgba(99,91,255,0.35)",
+                letterSpacing: 0.3,
+              }}
+            >
+              {loading ? "⏳ Generando link…" : `💳 Crear link${sendByWhatsapp ? " + enviar" : ""}`}
+            </button>
+            <div style={{ fontSize: 10.5, color: "#aaa", textAlign: "center" }}>
+              Link Stripe Checkout · pago seguro · queda registrado en eventos de la conv
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
