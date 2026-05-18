@@ -26,6 +26,7 @@ export default function InboxV2Page() {
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
             <a href="/admin/inbox-v2/health" style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "rgba(0,0,0,0.04)", color: "#666", textDecoration: "none", fontWeight: 600 }}>🩺 Salud</a>
             <a href="/admin/inbox-v2/numbers" style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "rgba(0,0,0,0.04)", color: "#666", textDecoration: "none", fontWeight: 600 }}>📱 Números</a>
+            <a href="/admin/inbox-v2/settings" style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "rgba(0,0,0,0.04)", color: "#666", textDecoration: "none", fontWeight: 600 }}>⚙️ Ajustes</a>
           </div>
         </div>
       </header>

@@ -277,7 +277,28 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
       </div>
 
       {/* Compose */}
-      <Composer onSend={send} onOpenTemplates={() => setTplOpen(true)} quickReplies={quickReplies} />
+      <Composer
+        onSend={send}
+        onOpenTemplates={() => setTplOpen(true)}
+        quickReplies={quickReplies}
+        onSendMedia={async (file, caption) => {
+          if (!conversationId) return;
+          const fd = new FormData();
+          fd.append("file", file);
+          if (caption) fd.append("caption", caption);
+          const r = await fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/send-media`, {
+            method: "POST",
+            credentials: "include",
+            body: fd,
+          });
+          if (!r.ok) {
+            const txt = await r.text();
+            setErr(`Error: ${txt.slice(0, 200)}`);
+            return;
+          }
+          await loadFull();
+        }}
+      />
       {err && <div style={{ padding: "6px 14px", fontSize: 11, color: "#900", background: "#fee" }}>{err}</div>}
 
       <TemplatesModal
@@ -294,13 +315,31 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   );
 }
 
-function Composer({ onSend, onOpenTemplates, quickReplies }: { onSend: (text: string) => Promise<void>; onOpenTemplates: () => void; quickReplies: QuickReply[] }) {
+function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia }: { onSend: (text: string) => Promise<void>; onOpenTemplates: () => void; quickReplies: QuickReply[]; onSendMedia: (file: File, caption: string | null) => Promise<void> }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   const [qrQuery, setQrQuery] = useState("");
   const [qrIdx, setQrIdx] = useState(0);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleAttach(file: File) {
+    setPendingFile(file);
+  }
+  async function sendPendingMedia() {
+    if (!pendingFile || uploadingMedia) return;
+    setUploadingMedia(true);
+    try {
+      await onSendMedia(pendingFile, text.trim() || null);
+      setPendingFile(null);
+      setText("");
+    } finally {
+      setUploadingMedia(false);
+    }
+  }
 
   // Filtra quick replies por shortcut o título
   const matches = (() => {
@@ -362,7 +401,38 @@ function Composer({ onSend, onOpenTemplates, quickReplies }: { onSend: (text: st
           ))}
         </div>
       )}
+      {pendingFile && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", marginBottom: 8, background: `${PURPLE}0d`, border: `1px solid ${PURPLE}33`, borderRadius: 8 }}>
+          <span style={{ fontSize: 22 }}>{pendingFile.type.startsWith("image/") ? "🖼️" : pendingFile.type.startsWith("video/") ? "🎬" : pendingFile.type.startsWith("audio/") ? "🎙️" : "📄"}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#1a1a2e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pendingFile.name}</div>
+            <div style={{ fontSize: 10, color: "#888" }}>{(pendingFile.size / 1024).toFixed(0)} KB · {pendingFile.type}</div>
+          </div>
+          <button onClick={() => setPendingFile(null)} style={{ background: "transparent", border: "none", color: "#888", cursor: "pointer", fontSize: 16 }}>×</button>
+          <button onClick={sendPendingMedia} disabled={uploadingMedia} style={{ padding: "6px 14px", background: PURPLE, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
+            {uploadingMedia ? "Enviando…" : "Enviar archivo"}
+          </button>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,video/*,audio/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void handleAttach(f);
+            if (e.target) e.target.value = "";
+          }}
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          title="Adjuntar imagen, vídeo, audio o documento"
+          style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.1)", background: "#fff", cursor: "pointer", fontSize: 16 }}
+        >
+          📎
+        </button>
         <button
           onClick={onOpenTemplates}
           title="Plantillas Meta · individual o bulk"
@@ -418,8 +488,19 @@ function Bubble({ m }: { m: Message }) {
             {m.is_template && m.template_name && <span style={{ marginLeft: 6, color: "#aaa", fontWeight: 400 }}>· template: {m.template_name}</span>}
           </div>
         )}
-        <div style={{ fontSize: 13, color: "#1a1a2e", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.content || (m.media_url ? `[media: ${m.media_type}]` : "—")}</div>
-        {m.media_url && m.media_type?.startsWith("image") && <img src={m.media_url} alt="media" style={{ marginTop: 6, maxWidth: 240, borderRadius: 6 }} />}
+        {m.media_url && m.media_type === "image" && <img src={m.media_url} alt="media" style={{ marginBottom: 6, maxWidth: 280, borderRadius: 6, display: "block" }} />}
+        {m.media_url && m.media_type === "video" && <video src={m.media_url} controls style={{ marginBottom: 6, maxWidth: 280, borderRadius: 6, display: "block" }} />}
+        {m.media_url && m.media_type === "audio" && <audio src={m.media_url} controls style={{ marginBottom: 6, maxWidth: 280, display: "block" }} />}
+        {m.media_url && m.media_type === "document" && (
+          <a href={m.media_url} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", marginBottom: 6, background: "rgba(0,0,0,0.04)", borderRadius: 6, textDecoration: "none", color: "#1a1a2e" }}>
+            <span style={{ fontSize: 20 }}>📄</span>
+            <span style={{ fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(m as any).media_filename ?? "Documento"}</span>
+            <span style={{ marginLeft: "auto", fontSize: 10, color: "#888" }}>↓</span>
+          </a>
+        )}
+        {(m.content || !m.media_url) && (
+          <div style={{ fontSize: 13, color: "#1a1a2e", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.content || "—"}</div>
+        )}
         <div style={{ fontSize: 10, color: "#bbb", marginTop: 4, textAlign: "right" }}>
           {fmtTime(m.timestamp)}
           {m.status && <span> · {m.status}</span>}
