@@ -128,7 +128,17 @@ export default function ExpiringPage() {
                 <WindowBadge info={{ last_inbound_at: r.last_inbound_at, expires_at: r.expires_at, minutes_left: r.minutes_left, window_status: r.window_status }} withCountdown />
                 {r.status && <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: "rgba(0,0,0,0.05)", color: "#555", fontWeight: 600 }}>{r.status}</span>}
                 {(r.unread_count ?? 0) > 0 && <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 4, background: PURPLE, color: "#fff", fontWeight: 700 }}>{r.unread_count} sin responder</span>}
-                <Link href={`/admin/inbox-v2#${r.conversation_id}`} style={{ marginLeft: "auto", fontSize: 11, color: PURPLE, textDecoration: "none", fontWeight: 600 }}>Abrir chat →</Link>
+                <a
+                  href={`/admin/inbox-v2#${r.conversation_id}`}
+                  onClick={(e) => {
+                    if (typeof window !== "undefined" && window.location.pathname === "/admin/inbox-v2") {
+                      e.preventDefault();
+                      window.history.pushState(null, "", `#${r.conversation_id}`);
+                      window.dispatchEvent(new HashChangeEvent("hashchange"));
+                    }
+                  }}
+                  style={{ marginLeft: "auto", fontSize: 11, color: PURPLE, textDecoration: "none", fontWeight: 600 }}
+                >Abrir chat →</a>
               </div>
 
               {r.last_message && (
