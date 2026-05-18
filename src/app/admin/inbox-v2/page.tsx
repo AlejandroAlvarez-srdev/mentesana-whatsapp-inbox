@@ -22,8 +22,11 @@ export default function InboxV2Page() {
       <header style={{ marginBottom: 12, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: "#1a1a2e", margin: 0 }}>📥 Inbox v2</h1>
-          <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 6, background: "rgba(106,23,140,0.08)", color: PURPLE, fontWeight: 600 }}>READ-ONLY · Sprint 1</span>
-          <span style={{ fontSize: 12, color: "#888" }}>Búsqueda semántica · resumen IA · sugerencia de respuesta basada en casos pagados</span>
+          <span style={{ fontSize: 12, color: "#888" }}>Búsqueda semántica · resumen IA · sugerencia basada en casos pagados</span>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+            <a href="/admin/inbox-v2/health" style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "rgba(0,0,0,0.04)", color: "#666", textDecoration: "none", fontWeight: 600 }}>🩺 Salud</a>
+            <a href="/admin/inbox-v2/numbers" style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "rgba(0,0,0,0.04)", color: "#666", textDecoration: "none", fontWeight: 600 }}>📱 Números</a>
+          </div>
         </div>
       </header>
 
