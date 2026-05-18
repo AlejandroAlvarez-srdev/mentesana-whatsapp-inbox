@@ -45,7 +45,7 @@ type TagItem = { id: string; name: string; color: string };
 
 const STATUSES = ["nuevo", "contactado", "asignado", "pagado", "cerrado"] as const;
 
-export default function ChatPanel({ conversationId, onChanged }: { conversationId: string | null; onChanged?: () => void }) {
+export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/admin/inbox-v2" }: { conversationId: string | null; onChanged?: () => void; apiBase?: string }) {
   const [conv, setConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
@@ -61,7 +61,7 @@ export default function ChatPanel({ conversationId, onChanged }: { conversationI
     setLoading(true);
     setErr(null);
     try {
-      const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}`, { credentials: "include" });
+      const r = await fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}`, { credentials: "include" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       setConv(d.conversation);
@@ -87,8 +87,8 @@ export default function ChatPanel({ conversationId, onChanged }: { conversationI
   // Load auxiliaries once
   useEffect(() => {
     Promise.all([
-      fetch("/api/admin/inbox-v2/agents", { credentials: "include" }).then((r) => (r.ok ? r.json() : { agents: [] })),
-      fetch("/api/admin/inbox-v2/tags", { credentials: "include" }).then((r) => (r.ok ? r.json() : { tags: [] })),
+      fetch(`${apiBase}/agents`, { credentials: "include" }).then((r) => (r.ok ? r.json() : { agents: [] })),
+      fetch(`${apiBase}/tags`, { credentials: "include" }).then((r) => (r.ok ? r.json() : { tags: [] })),
     ]).then(([a, g]) => {
       setAgents(a.agents ?? []);
       setTags(g.tags ?? []);
@@ -123,7 +123,7 @@ export default function ChatPanel({ conversationId, onChanged }: { conversationI
       if (!lastMsgTsRef.current) return;
       try {
         const r = await fetch(
-          `/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/poll?since=${encodeURIComponent(lastMsgTsRef.current)}`,
+          `${apiBase}/conversations/${encodeURIComponent(conversationId)}/poll?since=${encodeURIComponent(lastMsgTsRef.current)}`,
           { credentials: "include" },
         );
         if (!r.ok) return;
@@ -146,7 +146,7 @@ export default function ChatPanel({ conversationId, onChanged }: { conversationI
 
   async function patchConv(patch: Partial<Conversation>) {
     if (!conversationId) return;
-    const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}`, {
+    const r = await fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}`, {
       method: "PATCH",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -163,7 +163,7 @@ export default function ChatPanel({ conversationId, onChanged }: { conversationI
 
   async function send(text: string) {
     if (!conversationId || !text.trim()) return;
-    const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/send-text`, {
+    const r = await fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/send-text`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -254,6 +254,7 @@ export default function ChatPanel({ conversationId, onChanged }: { conversationI
         open={tplOpen}
         onClose={() => setTplOpen(false)}
         conversation={conv ? { id: conv.id, phone: conv.phone, lead_name: conv.lead_name } : null}
+        apiBase={apiBase}
         onSent={() => {
           setTplOpen(false);
           void loadFull();

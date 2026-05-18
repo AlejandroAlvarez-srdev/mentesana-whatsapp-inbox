@@ -40,12 +40,14 @@ export default function TemplatesModal({
   conversation,
   defaultFromNumberId,
   onSent,
+  apiBase = "/api/admin/inbox-v2",
 }: {
   open: boolean;
   onClose: () => void;
   conversation: ConversationLite | null;
   defaultFromNumberId?: string | null;
   onSent?: () => void;
+  apiBase?: string;
 }) {
   const [mode, setMode] = useState<Mode>("single");
   const [templates, setTemplates] = useState<MetaTemplate[]>([]);
@@ -72,8 +74,8 @@ export default function TemplatesModal({
     setBulkResult(null);
     setLoadErr(null);
     Promise.all([
-      fetch("/api/admin/inbox-v2/meta-templates", { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`meta-templates ${r.status}`))),
-      fetch("/api/admin/inbox-v2/whatsapp-numbers", { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`numbers ${r.status}`))),
+      fetch(`${apiBase}/meta-templates`, { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`meta-templates ${r.status}`))),
+      fetch(`${apiBase}/whatsapp-numbers`, { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`numbers ${r.status}`))),
     ])
       .then(([t, n]) => {
         setTemplates(t.templates ?? []);
@@ -214,7 +216,7 @@ export default function TemplatesModal({
     setSending(true);
     setSingleResult(null);
     try {
-      const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversation.id)}/send-template`, {
+      const r = await fetch(`${apiBase}/conversations/${encodeURIComponent(conversation.id)}/send-template`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -249,7 +251,7 @@ export default function TemplatesModal({
         reqBody.phones = parsedPhones;
         reqBody.components = buildComponents();
       }
-      const r = await fetch("/api/admin/inbox-v2/broadcast/template", {
+      const r = await fetch(`${apiBase}/broadcast/template`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

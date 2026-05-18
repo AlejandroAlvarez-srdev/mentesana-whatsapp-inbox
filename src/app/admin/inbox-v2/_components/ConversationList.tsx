@@ -27,9 +27,11 @@ type Mode = "list" | "search";
 export default function ConversationList({
   selectedId,
   onSelect,
+  apiBase = "/api/admin/inbox-v2",
 }: {
   selectedId: string | null;
   onSelect: (c: ConvSummary) => void;
+  apiBase?: string;
 }) {
   const [mode, setMode] = useState<Mode>("list");
   const [query, setQuery] = useState("");
@@ -48,7 +50,7 @@ export default function ConversationList({
         const semantic = q.startsWith("?"); // prefijo ? para búsqueda semántica
         if (semantic) {
           setMode("search");
-          const url = `/api/admin/inbox-v2/search?q=${encodeURIComponent(q.slice(1).trim())}&topK=25`;
+          const url = `${apiBase}/search?q=${encodeURIComponent(q.slice(1).trim())}&topK=25`;
           const r = await fetch(url, { credentials: "include" });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           const d = await r.json();
@@ -75,7 +77,7 @@ export default function ConversationList({
           setMode("list");
           const params = new URLSearchParams({ search: q, limit: "30" });
           if (pipelineFilter) params.set("pipeline", pipelineFilter);
-          const r = await fetch(`/api/admin/inbox-v2/conversations?${params}`, { credentials: "include" });
+          const r = await fetch(`${apiBase}/conversations?${params}`, { credentials: "include" });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           const d = await r.json();
           setItems(d.conversations ?? []);
@@ -85,7 +87,7 @@ export default function ConversationList({
         setMode("list");
         const params = new URLSearchParams({ limit: "30" });
         if (pipelineFilter) params.set("pipeline", pipelineFilter);
-        const r = await fetch(`/api/admin/inbox-v2/conversations?${params}`, { credentials: "include" });
+        const r = await fetch(`${apiBase}/conversations?${params}`, { credentials: "include" });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const d = await r.json();
         setItems(d.conversations ?? []);

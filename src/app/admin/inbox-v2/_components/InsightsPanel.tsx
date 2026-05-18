@@ -39,9 +39,11 @@ type Tab = "insights" | "perfil";
 export default function InsightsPanel({
   conversationId,
   selectedSummary,
+  apiBase = "/api/admin/inbox-v2",
 }: {
   conversationId: string | null;
   selectedSummary: ConvSummary | null;
+  apiBase?: string;
 }) {
   const [tab, setTab] = useState<Tab>("insights");
   const [insight, setInsight] = useState<Insight>(null);
@@ -57,7 +59,7 @@ export default function InsightsPanel({
   const [replyErr, setReplyErr] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/admin/inbox-v2/tags", { credentials: "include" })
+    fetch(`${apiBase}/tags`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : { tags: [] }))
       .then((d) => setTagMaster(d.tags ?? []));
   }, []);
@@ -73,9 +75,9 @@ export default function InsightsPanel({
     if (!conversationId) return;
     setLoading(true);
     Promise.all([
-      fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}?messages=false`, { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))).then((d) => setInsight(d.insight ?? null)).catch(() => {}),
-      fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/risk-flags`, { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))).then((d) => setRisk(d)).catch(() => {}),
-      fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/lead-profile`, { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))).then((d) => setProfile(d)).catch(() => {}),
+      fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}?messages=false`, { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))).then((d) => setInsight(d.insight ?? null)).catch(() => {}),
+      fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/risk-flags`, { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))).then((d) => setRisk(d)).catch(() => {}),
+      fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/lead-profile`, { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))).then((d) => setProfile(d)).catch(() => {}),
     ]).finally(() => setLoading(false));
   }, [conversationId]);
 
@@ -85,7 +87,7 @@ export default function InsightsPanel({
     setSummaryErr(null);
     setSummaryStreaming(true);
     try {
-      const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/summary`, { method: "POST", credentials: "include" });
+      const r = await fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/summary`, { method: "POST", credentials: "include" });
       if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
       const reader = r.body.getReader();
       const dec = new TextDecoder();
@@ -109,7 +111,7 @@ export default function InsightsPanel({
     setReplyErr(null);
     setReplyStreaming(true);
     try {
-      const r = await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/suggested-reply`, { method: "POST", credentials: "include" });
+      const r = await fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/suggested-reply`, { method: "POST", credentials: "include" });
       if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
       const reader = r.body.getReader();
       const dec = new TextDecoder();
@@ -129,7 +131,7 @@ export default function InsightsPanel({
 
   async function attachTag(tagId: string) {
     if (!conversationId) return;
-    await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/tags`, {
+    await fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/tags`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -139,7 +141,7 @@ export default function InsightsPanel({
   }
   async function detachTag(tagId: string) {
     if (!conversationId) return;
-    await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/tags/${encodeURIComponent(tagId)}`, {
+    await fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/tags/${encodeURIComponent(tagId)}`, {
       method: "DELETE",
       credentials: "include",
     });
@@ -148,14 +150,14 @@ export default function InsightsPanel({
 
   function refreshProfile() {
     if (!conversationId) return;
-    fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/lead-profile`, { credentials: "include" })
+    fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/lead-profile`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setProfile(d));
   }
 
   async function saveNotes(notes: string) {
     if (!conversationId) return;
-    await fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}`, {
+    await fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}`, {
       method: "PATCH",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
