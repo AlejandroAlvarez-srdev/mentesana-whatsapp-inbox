@@ -93,6 +93,8 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
     setConv(null);
     setMessages([]);
     lastMsgTsRef.current = null;
+    lastScrollHeightRef.current = 0; // reset → fuerza scroll al fondo al cargar la nueva conv
+    setHasMoreOlder(true);
     void loadFull();
   }, [conversationId, loadFull]);
 
