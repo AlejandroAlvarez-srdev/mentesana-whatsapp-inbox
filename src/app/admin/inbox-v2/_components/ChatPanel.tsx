@@ -159,10 +159,12 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
     },
   });
 
-  // Fallback polling cada 30 s por si Realtime se cae (Vercel cold start, red, etc).
+  // Polling activo cada 4s (backup fiable si el WebSocket de Realtime no engancha).
+  // Si la pestaña está oculta, sube a 15s para ahorrar batería.
   useEffect(() => {
     if (!conversationId) return;
-    const iv = setInterval(async () => {
+    let interval = 4000;
+    const tick = async () => {
       if (!lastMsgTsRef.current) return;
       try {
         const r = await fetch(
@@ -179,9 +181,20 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
       } catch {
         /* ignore */
       }
-    }, 30000);
-    return () => clearInterval(iv);
-  }, [conversationId]);
+    };
+    let iv: any = setInterval(tick, interval);
+    const onVis = () => {
+      const newInterval = document.hidden ? 15000 : 4000;
+      if (newInterval !== interval) {
+        interval = newInterval;
+        clearInterval(iv);
+        iv = setInterval(tick, interval);
+        if (!document.hidden) void tick(); // refresca al volver a la pestaña
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  }, [conversationId, apiBase]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;

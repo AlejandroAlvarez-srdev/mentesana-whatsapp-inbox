@@ -33,6 +33,7 @@ export default function ConversationList({
   onSelect: (c: ConvSummary) => void;
   apiBase?: string;
 }) {
+  const PAGE_SIZE = 30;
   const [mode, setMode] = useState<Mode>("list");
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<ConvSummary[]>([]);
@@ -41,8 +42,12 @@ export default function ConversationList({
   const [err, setErr] = useState<string | null>(null);
   const [pipelineFilter, setPipelineFilter] = useState<"" | "ventas" | "soporte">("");
   const [numberFilter, setNumberFilter] = useState("");
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [waNumbers, setWaNumbers] = useState<{ phone_number_id: string; name: string; phone_number: string | null }[]>([]);
   const debounceRef = useRef<number | null>(null);
+  const reqIdRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     fetch(`${apiBase}/whatsapp-numbers`, { credentials: "include" })
@@ -51,77 +56,99 @@ export default function ConversationList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function loadList(q: string) {
-    setLoading(true);
+  async function loadList(q: string, opts?: { append?: boolean; silent?: boolean }) {
+    const append = opts?.append === true;
+    const silent = opts?.silent === true;
+    if (abortRef.current) abortRef.current.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    const myReqId = ++reqIdRef.current;
+    if (!silent) setLoading(true);
     setErr(null);
     try {
-      if (q.trim()) {
-        const semantic = q.startsWith("?"); // prefijo ? para búsqueda semántica
-        if (semantic) {
-          setMode("search");
-          const url = `${apiBase}/search?q=${encodeURIComponent(q.slice(1).trim())}&topK=25`;
-          const r = await fetch(url, { credentials: "include" });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          const d = await r.json();
-          // resultados → reusar shape ConvSummary
-          const mapped: ConvSummary[] = (d.results ?? []).map((x: any) => ({
-            id: x.conversation_id,
-            phone: x.phone ?? "",
-            lead_name: x.lead_name ?? null,
-            source: null,
-            pipeline_type: null,
-            status: null,
-            purchase_status: x.purchase_status ?? null,
-            paid_at: x.paid_at ?? null,
-            purchase_amount: null,
-            assigned_psychologist_name: null,
-            last_message_time: x.last_message_time ?? null,
-            last_message: x.similarity ? `🔍 similitud ${(x.similarity * 100).toFixed(0)}%` : null,
-            unread_count: null,
-            created_at: null,
-          }));
-          setItems(mapped);
-          setTotal(mapped.length);
-        } else {
-          setMode("list");
-          const params = new URLSearchParams({ search: q, limit: "30" });
-          if (pipelineFilter) params.set("pipeline", pipelineFilter);
-          if (numberFilter) params.set("phone_number_id", numberFilter);
-          const r = await fetch(`${apiBase}/conversations?${params}`, { credentials: "include" });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          const d = await r.json();
-          setItems(d.conversations ?? []);
-          setTotal(d.total ?? 0);
-        }
-      } else {
-        setMode("list");
-        const params = new URLSearchParams({ limit: "30" });
-        if (pipelineFilter) params.set("pipeline", pipelineFilter);
-        if (numberFilter) params.set("phone_number_id", numberFilter);
-        const r = await fetch(`${apiBase}/conversations?${params}`, { credentials: "include" });
+      // Búsqueda semántica solo en primera página, no se pagina
+      if (q.trim().startsWith("?")) {
+        setMode("search");
+        const url = `${apiBase}/search?q=${encodeURIComponent(q.slice(1).trim())}&topK=25`;
+        const r = await fetch(url, { credentials: "include", signal: ac.signal });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const d = await r.json();
-        setItems(d.conversations ?? []);
-        setTotal(d.total ?? 0);
+        if (reqIdRef.current !== myReqId) return;
+        const mapped: ConvSummary[] = (d.results ?? []).map((x: any) => ({
+          id: x.conversation_id, phone: x.phone ?? "", lead_name: x.lead_name ?? null,
+          source: null, pipeline_type: null, status: null,
+          purchase_status: x.purchase_status ?? null, paid_at: x.paid_at ?? null,
+          purchase_amount: null, assigned_psychologist_name: null,
+          last_message_time: x.last_message_time ?? null,
+          last_message: x.similarity ? `🔍 similitud ${(x.similarity * 100).toFixed(0)}%` : null,
+          unread_count: null, created_at: null,
+        }));
+        setItems(mapped); setTotal(mapped.length);
+        return;
       }
+
+      setMode("list");
+      const offset = append ? items.length : 0;
+      const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
+      if (q.trim()) params.set("search", q.trim());
+      if (pipelineFilter) params.set("pipeline", pipelineFilter);
+      if (numberFilter) params.set("phone_number_id", numberFilter);
+      if (unreadOnly) params.set("unread", "true");
+      const r = await fetch(`${apiBase}/conversations?${params}`, { credentials: "include", signal: ac.signal });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      if (reqIdRef.current !== myReqId) return;
+      if (append) {
+        const existing = new Set(items.map((c) => c.id));
+        const newOnes = (d.conversations ?? []).filter((c: any) => !existing.has(c.id));
+        setItems([...items, ...newOnes]);
+      } else {
+        setItems(d.conversations ?? []);
+      }
+      setTotal(d.total ?? 0);
     } catch (e: any) {
-      setErr(String(e.message ?? e));
+      if (e?.name === "AbortError") return;
+      if (reqIdRef.current === myReqId) setErr(String(e.message ?? e));
     } finally {
-      setLoading(false);
+      if (reqIdRef.current === myReqId && !silent) setLoading(false);
     }
   }
 
-  // Debounced search
+  // Debounced search / filter changes — reset y primera página
   useEffect(() => {
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
-    debounceRef.current = window.setTimeout(() => {
-      void loadList(query);
-    }, 300);
-    return () => {
-      if (debounceRef.current) window.clearTimeout(debounceRef.current);
-    };
+    debounceRef.current = window.setTimeout(() => { void loadList(query); }, 250);
+    return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, pipelineFilter, numberFilter]);
+  }, [query, pipelineFilter, numberFilter, unreadOnly]);
+
+  // Infinite scroll: cuando el sentinel entra en viewport, carga la siguiente página
+  useEffect(() => {
+    if (!sentinelRef.current) return;
+    if (items.length === 0 || items.length >= total || loading || mode === "search") return;
+    const io = new IntersectionObserver(
+      (entries) => { if (entries[0]?.isIntersecting) void loadList(query, { append: true, silent: true }); },
+      { rootMargin: "200px 0px" },
+    );
+    io.observe(sentinelRef.current);
+    return () => io.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length, total, loading, mode]);
+
+  // Polling backup — refresca primera página cada 6s para garantizar que ve mensajes nuevos
+  // (silent: no muestra spinner). En segundo plano sube a 20s.
+  useEffect(() => {
+    if (mode === "search") return;
+    let interval = 6000;
+    let iv: any = setInterval(() => { void loadList(query, { silent: true }); }, interval);
+    const onVis = () => {
+      const ni = document.hidden ? 20000 : 6000;
+      if (ni !== interval) { interval = ni; clearInterval(iv); iv = setInterval(() => { void loadList(query, { silent: true }); }, ni); if (!document.hidden) void loadList(query, { silent: true }); }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, pipelineFilter, numberFilter, unreadOnly, mode]);
 
   // Realtime: cuando una conversación cambia (nuevo mensaje del lead, status,
   // unread_count, asignación), refrescamos la lista actual sin recargar todo
@@ -174,8 +201,20 @@ export default function ConversationList({
           <PipelinePill v="" cur={pipelineFilter} set={setPipelineFilter} label="Todas" />
           <PipelinePill v="ventas" cur={pipelineFilter} set={setPipelineFilter} label="Ventas" />
           <PipelinePill v="soporte" cur={pipelineFilter} set={setPipelineFilter} label="Soporte" />
+          <button
+            type="button"
+            onClick={() => setUnreadOnly((v) => !v)}
+            style={{
+              padding: "3px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: "none", cursor: "pointer",
+              background: unreadOnly ? "#dc2626" : "rgba(220,38,38,0.1)",
+              color: unreadOnly ? "#fff" : "#991b1b",
+            }}
+            title="Solo conversaciones sin responder"
+          >
+            🔴 Sin responder
+          </button>
           <span style={{ marginLeft: "auto", fontSize: 11, color: "#888" }}>
-            {loading ? "…" : `${items.length}${total ? ` / ${total.toLocaleString()}` : ""}`}
+            {loading && items.length === 0 ? "…" : `${items.length}${total ? ` / ${total.toLocaleString()}` : ""}`}
           </span>
         </div>
         {waNumbers.length > 1 && (
@@ -198,9 +237,24 @@ export default function ConversationList({
         {items.length === 0 && !loading && (
           <div style={{ padding: 24, textAlign: "center", color: "#aaa", fontSize: 12 }}>Sin resultados</div>
         )}
+        {items.length === 0 && loading && (
+          <div style={{ padding: "20px 14px", display: "grid", gap: 6 }}>
+            {Array.from({ length: 8 }).map((_, i) => <div key={i} className="skel" style={{ height: 56, borderRadius: 8 }} />)}
+          </div>
+        )}
         {items.map((c) => (
           <ConvRow key={c.id} c={c} selected={c.id === selectedId} onClick={() => onSelect(c)} />
         ))}
+        {items.length > 0 && items.length < total && mode === "list" && (
+          <div ref={sentinelRef} style={{ padding: "12px 14px", textAlign: "center", color: "#aaa", fontSize: 11 }}>
+            {loading ? "Cargando más…" : `Cargando ${(total - items.length).toLocaleString("es-ES")} más…`}
+          </div>
+        )}
+        {items.length > 0 && items.length >= total && mode === "list" && (
+          <div style={{ padding: "12px 14px", textAlign: "center", color: "#bbb", fontSize: 10, fontStyle: "italic" }}>
+            ✓ Todas las conversaciones cargadas
+          </div>
+        )}
       </div>
     </div>
   );
