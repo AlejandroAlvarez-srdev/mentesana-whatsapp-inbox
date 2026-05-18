@@ -68,8 +68,8 @@ export default function ChatPanel({ conversationId, onChanged }: { conversationI
       setMessages(d.messages ?? []);
       const last = (d.messages ?? []).slice(-1)[0]?.timestamp ?? null;
       lastMsgTsRef.current = last;
-      // mark read (fire and forget)
-      void fetch(`/api/admin/inbox-v2/conversations/${encodeURIComponent(conversationId)}/mark-read`, { method: "POST", credentials: "include" });
+      // No marcamos como leído al abrir. Por regla del equipo, una conversación
+      // solo deja de estar "unread" cuando el AGENTE responde — ver no cuenta.
     } catch (e: any) {
       setErr(String(e.message ?? e));
     } finally {
