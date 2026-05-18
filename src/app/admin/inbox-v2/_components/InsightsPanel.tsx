@@ -184,6 +184,23 @@ export default function InsightsPanel({
 
   return (
     <div style={panelStyle}>
+      {/* Link al Customer 360 */}
+      {(profile?.conversation?.phone || selectedSummary?.phone) && (
+        <a
+          href={`/agent/customers/${encodeURIComponent(profile?.conversation?.phone ?? selectedSummary?.phone ?? "")}`}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            padding: "9px 12px",
+            background: "linear-gradient(135deg, rgba(106,23,140,0.08) 0%, rgba(250,128,114,0.06) 100%)",
+            color: PURPLE, fontSize: 12, fontWeight: 700, textDecoration: "none",
+            borderBottom: "1px solid rgba(106,23,140,0.12)",
+            flexShrink: 0,
+          }}
+        >
+          🔍 Ver perfil 360° completo →
+        </a>
+      )}
+
       {/* Tabs */}
       <div style={{ display: "flex", padding: 8, gap: 4, borderBottom: "1px solid rgba(0,0,0,0.06)", flexShrink: 0 }}>
         <TabBtn cur={tab} v="pipeline" set={setTab} label="🎯 Pipeline" />
