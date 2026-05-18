@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import TemplatesModal from "./TemplatesModal";
+import { useMessagesRealtime } from "../_hooks/useInboxRealtime";
 
 const PURPLE = "#6A178C";
 
@@ -94,7 +95,28 @@ export default function ChatPanel({ conversationId, onChanged }: { conversationI
     });
   }, []);
 
-  // Polling for new messages while conversation is open
+  // Realtime: WebSocket a Supabase, INSERT/UPDATE en messages_mentesana filtrado por conversation_id
+  useMessagesRealtime(conversationId, {
+    onInsert: (row) => {
+      if (!conv) return;
+      const enriched: Message = {
+        ...(row as Message),
+        is_lead: row.sender === conv.phone,
+        is_agent: row.sender !== conv.phone && row.sender !== "psicologo" && !/^\d+$/.test(row.sender ?? ""),
+        is_psychologist: row.sender === "psicologo",
+      };
+      setMessages((prev) => {
+        if (prev.find((p) => p.id === enriched.id)) return prev;
+        return [...prev, enriched];
+      });
+      lastMsgTsRef.current = row.timestamp;
+    },
+    onUpdate: (row) => {
+      setMessages((prev) => prev.map((m) => (m.id === row.id ? { ...m, ...row } : m)));
+    },
+  });
+
+  // Fallback polling cada 30 s por si Realtime se cae (Vercel cold start, red, etc).
   useEffect(() => {
     if (!conversationId) return;
     const iv = setInterval(async () => {
@@ -114,7 +136,7 @@ export default function ChatPanel({ conversationId, onChanged }: { conversationI
       } catch {
         /* ignore */
       }
-    }, 6000);
+    }, 30000);
     return () => clearInterval(iv);
   }, [conversationId]);
 

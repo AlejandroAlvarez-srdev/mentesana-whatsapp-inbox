@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useConversationsRealtime } from "../_hooks/useInboxRealtime";
 
 const PURPLE = "#6A178C";
 
@@ -108,6 +109,20 @@ export default function ConversationList({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, pipelineFilter]);
+
+  // Realtime: cuando una conversación cambia (nuevo mensaje del lead, status,
+  // unread_count, asignación), refrescamos la lista actual sin recargar todo
+  // el panel. Para evitar storms cuando llega un burst, debounce 500 ms.
+  const realtimeDebounceRef = useRef<number | null>(null);
+  useConversationsRealtime({
+    onChange: () => {
+      if (mode === "search") return;
+      if (realtimeDebounceRef.current) window.clearTimeout(realtimeDebounceRef.current);
+      realtimeDebounceRef.current = window.setTimeout(() => {
+        void loadList(query);
+      }, 500);
+    },
+  });
 
   return (
     <div
