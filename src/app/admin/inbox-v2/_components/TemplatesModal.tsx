@@ -39,6 +39,7 @@ export default function TemplatesModal({
   onClose,
   conversation,
   defaultFromNumberId,
+  defaultTemplateName,
   onSent,
   apiBase = "/api/admin/inbox-v2",
 }: {
@@ -46,6 +47,7 @@ export default function TemplatesModal({
   onClose: () => void;
   conversation: ConversationLite | null;
   defaultFromNumberId?: string | null;
+  defaultTemplateName?: string | null;
   onSent?: () => void;
   apiBase?: string;
 }) {
@@ -86,10 +88,15 @@ export default function TemplatesModal({
           const initial = defaultFromNumberId && nums.find((x) => x.phone_number_id === defaultFromNumberId) ? defaultFromNumberId : nums.find((x) => x.is_default)?.phone_number_id ?? nums[0]?.phone_number_id ?? "";
           setFromNumberId(initial);
         }
+        // Pre-seleccionar plantilla si viene defaultTemplateName
+        if (defaultTemplateName) {
+          const match = (t.templates ?? []).find((x: MetaTemplate) => x.name === defaultTemplateName && x.status === "APPROVED");
+          if (match) setSelected(match);
+        }
       })
       .catch((e) => setLoadErr(String(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultFromNumberId]);
+  }, [open, defaultFromNumberId, defaultTemplateName]);
 
   // Filtra por número origen (solo plantillas disponibles desde el WABA seleccionado)
   const filteredTpls = useMemo(() => {
