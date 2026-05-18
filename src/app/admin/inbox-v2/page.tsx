@@ -24,6 +24,7 @@ export default function InboxV2Page() {
           <h1 style={{ fontSize: 24, fontWeight: 700, color: "#1a1a2e", margin: 0 }}>📥 Inbox v2</h1>
           <span style={{ fontSize: 12, color: "#888" }}>Búsqueda semántica · resumen IA · sugerencia basada en casos pagados</span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+            <a href="/admin/inbox-v2/expiring" style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "rgba(245,158,11,0.12)", color: "#92400e", textDecoration: "none", fontWeight: 700 }}>⏰ Por cerrar</a>
             <a href="/admin/inbox-v2/health" style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "rgba(0,0,0,0.04)", color: "#666", textDecoration: "none", fontWeight: 600 }}>🩺 Salud</a>
             <a href="/admin/inbox-v2/numbers" style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "rgba(0,0,0,0.04)", color: "#666", textDecoration: "none", fontWeight: 600 }}>📱 Números</a>
             <a href="/admin/inbox-v2/settings" style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "rgba(0,0,0,0.04)", color: "#666", textDecoration: "none", fontWeight: 600 }}>⚙️ Ajustes</a>

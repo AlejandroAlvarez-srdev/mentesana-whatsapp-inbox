@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import TemplatesModal from "./TemplatesModal";
+import WindowBadge, { WindowInfo, fmtMinutesLeft, colorFor } from "./WindowBadge";
 import { useMessagesRealtime } from "../_hooks/useInboxRealtime";
 
 const PURPLE = "#6A178C";
@@ -59,6 +60,7 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   const [tplOpen, setTplOpen] = useState(false);
   const [waNumbers, setWaNumbers] = useState<{ phone_number_id: string; name: string; phone_number: string | null; is_default: boolean; is_pdf_number: boolean }[]>([]);
   const [assignedNumber, setAssignedNumber] = useState<{ name: string; phone_number_id: string; phone_number: string | null } | null>(null);
+  const [windowInfo, setWindowInfo] = useState<WindowInfo | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastMsgTsRef = useRef<string | null>(null);
 
@@ -107,13 +109,16 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
     });
   }, []);
 
-  // Cuando cambia la conversación, leer el número asignado (vía lead-profile)
+  // Cuando cambia la conversación, leer el número asignado (vía lead-profile) + ventana 24h
   useEffect(() => {
-    if (!conversationId) { setAssignedNumber(null); return; }
+    if (!conversationId) { setAssignedNumber(null); setWindowInfo(null); return; }
     fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/lead-profile`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setAssignedNumber(d?.assigned_wa_number ?? null));
-  }, [conversationId, apiBase]);
+    fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/window`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setWindowInfo(d ?? null));
+  }, [conversationId, apiBase, messages.length]);
 
   async function assignNumber(phoneNumberId: string) {
     if (!conversationId) return;
@@ -329,6 +334,11 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
           ))}
         </select>
       </div>
+
+      {/* Banner ventana 24h */}
+      {windowInfo && (
+        <WindowBanner info={windowInfo} />
+      )}
 
       {/* messages */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "16px 14px", background: "#FAFAFA" }}>
@@ -588,3 +598,39 @@ const selectStyle: React.CSSProperties = {
   background: "#fff",
   cursor: "pointer",
 };
+
+function WindowBanner({ info }: { info: WindowInfo }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (info.window_status === "open" || info.window_status === "expiring_soon") {
+      const iv = setInterval(() => setTick((t) => t + 1), 30000);
+      return () => clearInterval(iv);
+    }
+  }, [info.window_status]);
+
+  const live = info.expires_at ? Math.max(0, Math.floor((new Date(info.expires_at).getTime() - Date.now()) / 60000)) : null;
+  const c = colorFor(info.window_status);
+
+  let cta: React.ReactNode = null;
+  if (info.window_status === "expiring_soon") {
+    cta = <span style={{ marginLeft: 8, fontSize: 11, color: c.fg, fontWeight: 600 }}>💡 Generá la sugerencia urgente abajo en el panel derecho →</span>;
+  } else if (info.window_status === "expired") {
+    cta = <span style={{ marginLeft: 8, fontSize: 11, color: c.fg, fontWeight: 600 }}>📋 Solo plantillas Meta pueden reactivar esta conversación</span>;
+  }
+
+  return (
+    <div style={{ padding: "6px 14px", background: c.bg, borderBottom: `1px solid ${c.border}`, display: "flex", alignItems: "center", gap: 10, fontSize: 11.5 }}>
+      <span style={{ color: c.fg, fontWeight: 700 }}>{c.label}</span>
+      {info.expires_at && info.window_status !== "expired" && info.window_status !== "never_inbound" && (
+        <>
+          <span style={{ color: c.fg }}>· quedan <strong>{fmtMinutesLeft(live)}</strong></span>
+          <span style={{ color: c.fg, opacity: 0.7 }}>· expira {new Date(info.expires_at).toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+        </>
+      )}
+      {info.window_status === "expired" && info.last_inbound_at && (
+        <span style={{ color: c.fg, opacity: 0.7 }}>· última inbound {new Date(info.last_inbound_at).toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+      )}
+      {cta}
+    </div>
+  );
+}
