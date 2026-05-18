@@ -555,7 +555,7 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
           </div>
         )}
         {messages.length === 0 && <div style={{ textAlign: "center", color: "#aaa", fontSize: 12, padding: 30 }}>Sin mensajes.</div>}
-        {messages.map((m) => <Bubble key={m.id} m={m} />)}
+        {messages.map((m) => <Bubble key={m.id} m={m} apiBase={apiBase} />)}
       </div>
 
       {/* Compose */}
@@ -765,13 +765,26 @@ function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia }: { onSe
   );
 }
 
-function Bubble({ m }: { m: Message }) {
+function resolveMediaUrl(rawUrl: string | null, apiBase: string): string | null {
+  if (!rawUrl) return null;
+  if (rawUrl.startsWith("storage://")) {
+    // Detecta si es admin o agent path
+    const resolver = apiBase.includes("/agent/")
+      ? "/api/agent/inbox-media-resolver"
+      : "/api/admin/inbox-v2-media-resolver";
+    return `${resolver}?url=${encodeURIComponent(rawUrl)}`;
+  }
+  return rawUrl;
+}
+
+function Bubble({ m, apiBase }: { m: Message; apiBase: string }) {
   const isLead = m.is_lead;
   const align = isLead ? "flex-start" : "flex-end";
   const bg = isLead ? "#fff" : m.is_psychologist ? "rgba(106,23,140,0.12)" : "linear-gradient(135deg, #6A178C 0%, #8b2dad 100%)";
   const border = isLead ? "1px solid rgba(0,0,0,0.06)" : "none";
   const textColor = !isLead && !m.is_psychologist ? "#fff" : "#1a1a2e";
   const radius = isLead ? "14px 14px 14px 4px" : "14px 14px 4px 14px";
+  const mediaSrc = resolveMediaUrl(m.media_url, apiBase);
 
   return (
     <div style={{ display: "flex", justifyContent: align, marginBottom: 10 }}>
@@ -792,19 +805,24 @@ function Bubble({ m }: { m: Message }) {
             {m.is_template && m.template_name && <span style={{ marginLeft: 6, opacity: 0.8, fontWeight: 500, textTransform: "none" }}>· template: {m.template_name}</span>}
           </div>
         )}
-        {m.media_url && m.media_type === "image" && <img src={m.media_url} alt="media" style={{ marginBottom: 6, maxWidth: 280, borderRadius: 6, display: "block" }} />}
-        {m.media_url && m.media_type === "video" && <video src={m.media_url} controls style={{ marginBottom: 6, maxWidth: 280, borderRadius: 6, display: "block" }} />}
-        {m.media_url && m.media_type === "audio" && <audio src={m.media_url} controls style={{ marginBottom: 6, maxWidth: 280, display: "block" }} />}
-        {m.media_url && m.media_type === "document" && (
-          <a href={m.media_url} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", marginBottom: 6, background: "rgba(0,0,0,0.04)", borderRadius: 6, textDecoration: "none", color: "#1a1a2e" }}>
+        {mediaSrc && (m.media_type === "image" || m.media_type === "sticker") && <img src={mediaSrc} alt="media" style={{ marginBottom: 6, maxWidth: 280, borderRadius: 6, display: "block" }} />}
+        {mediaSrc && m.media_type === "video" && <video src={mediaSrc} controls style={{ marginBottom: 6, maxWidth: 280, borderRadius: 6, display: "block" }} />}
+        {mediaSrc && m.media_type === "audio" && <audio src={mediaSrc} controls style={{ marginBottom: 6, maxWidth: 280, display: "block" }} />}
+        {mediaSrc && m.media_type === "document" && (
+          <a href={mediaSrc} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", marginBottom: 6, background: "rgba(0,0,0,0.04)", borderRadius: 6, textDecoration: "none", color: "#1a1a2e" }}>
             <span style={{ fontSize: 20 }}>📄</span>
             <span style={{ fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(m as any).media_filename ?? "Documento"}</span>
             <span style={{ marginLeft: "auto", fontSize: 10, color: "#888" }}>↓</span>
           </a>
         )}
-        {(m.content || !m.media_url) && (
-          <div style={{ fontSize: 13.5, lineHeight: 1.45, color: textColor, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.content || "—"}</div>
-        )}
+        {/* Mostrar content solo si NO es un placeholder de media ([image] / [video] / [audio] / [sticker] / [document] / "📎 ...") */}
+        {(() => {
+          const content = m.content?.trim() ?? "";
+          const isPlaceholder = /^(\[image\]|\[video\]|\[audio\]|\[sticker\]|\[document\]|📎\s)/i.test(content);
+          if (mediaSrc && isPlaceholder) return null; // media ya renderizado, no duplicar texto
+          if (!content && !mediaSrc) return <div style={{ fontSize: 13.5, color: textColor, opacity: 0.5 }}>—</div>;
+          return content ? <div style={{ fontSize: 13.5, lineHeight: 1.45, color: textColor, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{content}</div> : null;
+        })()}
         <div style={{ fontSize: 9.5, color: isLead || m.is_psychologist ? "#aaa" : "rgba(255,255,255,0.7)", marginTop: 4, textAlign: "right", fontWeight: 500 }}>
           {fmtTime(m.timestamp)}
           {m.status && <span> · {m.status}</span>}
