@@ -440,6 +440,6 @@ function Markdown({ text }: { text: string }) {
   return <div style={{ fontSize: 12.5, lineHeight: 1.5, color: "#1a1a2e" }} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-const panelStyle: React.CSSProperties = { background: "#fff", borderRadius: 12, border: "1px solid rgba(0,0,0,0.06)", display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" };
+const panelStyle: React.CSSProperties = { background: "#fff", borderRadius: 14, border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 1px 3px rgba(0,0,0,0.02)", display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", width: "100%" };
 const errBox: React.CSSProperties = { fontSize: 11, color: "#900", background: "#fee", border: "1px solid #fcc", padding: 6, borderRadius: 6, marginBottom: 6 };
 const btnStyle = (disabled: boolean): React.CSSProperties => ({ padding: "5px 12px", fontSize: 11, fontWeight: 600, borderRadius: 6, border: "none", cursor: disabled ? "default" : "pointer", background: disabled ? "rgba(0,0,0,0.06)" : PURPLE, color: disabled ? "#888" : "#fff" });

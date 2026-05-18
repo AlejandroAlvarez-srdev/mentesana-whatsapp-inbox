@@ -236,9 +236,9 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   if (!conv) return null;
 
   return (
-    <div style={{ background: "#fff", borderRadius: 12, border: "1px solid rgba(0,0,0,0.06)", display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+    <div style={{ background: "#fff", borderRadius: 14, border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 1px 3px rgba(0,0,0,0.02)", display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", width: "100%" }}>
       {/* Header */}
-      <div style={{ padding: "10px 14px", borderBottom: "1px solid rgba(0,0,0,0.06)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(0,0,0,0.06)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
             <span style={{ fontWeight: 700, fontSize: 15, color: "#1a1a2e" }}>{conv.lead_name?.trim() || "(sin nombre)"}</span>
@@ -546,16 +546,28 @@ function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia }: { onSe
 function Bubble({ m }: { m: Message }) {
   const isLead = m.is_lead;
   const align = isLead ? "flex-start" : "flex-end";
-  const bg = isLead ? "#fff" : m.is_psychologist ? "rgba(106,23,140,0.08)" : "rgba(37,99,235,0.06)";
+  const bg = isLead ? "#fff" : m.is_psychologist ? "rgba(106,23,140,0.12)" : "linear-gradient(135deg, #6A178C 0%, #8b2dad 100%)";
   const border = isLead ? "1px solid rgba(0,0,0,0.06)" : "none";
+  const textColor = !isLead && !m.is_psychologist ? "#fff" : "#1a1a2e";
+  const radius = isLead ? "14px 14px 14px 4px" : "14px 14px 4px 14px";
 
   return (
-    <div style={{ display: "flex", justifyContent: align, marginBottom: 8 }}>
-      <div style={{ maxWidth: "78%", background: bg, border, borderRadius: 12, padding: "8px 12px" }}>
+    <div style={{ display: "flex", justifyContent: align, marginBottom: 10 }}>
+      <div
+        style={{
+          maxWidth: "min(78%, 520px)",
+          background: bg,
+          border,
+          borderRadius: radius,
+          padding: "9px 13px",
+          boxShadow: isLead ? "0 1px 2px rgba(0,0,0,0.04)" : "0 2px 8px rgba(106,23,140,0.15)",
+          color: textColor,
+        }}
+      >
         {!isLead && (
-          <div style={{ fontSize: 10, color: "#888", fontWeight: 600, marginBottom: 2 }}>
-            {m.is_psychologist ? "PSIC" : m.sender_name || m.sender || "AGENTE"}
-            {m.is_template && m.template_name && <span style={{ marginLeft: 6, color: "#aaa", fontWeight: 400 }}>· template: {m.template_name}</span>}
+          <div style={{ fontSize: 9.5, color: m.is_psychologist ? PURPLE : "rgba(255,255,255,0.85)", fontWeight: 700, marginBottom: 3, letterSpacing: 0.4, textTransform: "uppercase" }}>
+            {m.is_psychologist ? "Psicóloga" : m.sender_name || m.sender || "Agente"}
+            {m.is_template && m.template_name && <span style={{ marginLeft: 6, opacity: 0.8, fontWeight: 500, textTransform: "none" }}>· template: {m.template_name}</span>}
           </div>
         )}
         {m.media_url && m.media_type === "image" && <img src={m.media_url} alt="media" style={{ marginBottom: 6, maxWidth: 280, borderRadius: 6, display: "block" }} />}
@@ -569,9 +581,9 @@ function Bubble({ m }: { m: Message }) {
           </a>
         )}
         {(m.content || !m.media_url) && (
-          <div style={{ fontSize: 13, color: "#1a1a2e", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.content || "—"}</div>
+          <div style={{ fontSize: 13.5, lineHeight: 1.45, color: textColor, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.content || "—"}</div>
         )}
-        <div style={{ fontSize: 10, color: "#bbb", marginTop: 4, textAlign: "right" }}>
+        <div style={{ fontSize: 9.5, color: isLead || m.is_psychologist ? "#aaa" : "rgba(255,255,255,0.7)", marginTop: 4, textAlign: "right", fontWeight: 500 }}>
           {fmtTime(m.timestamp)}
           {m.status && <span> · {m.status}</span>}
         </div>

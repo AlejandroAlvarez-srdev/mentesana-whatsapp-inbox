@@ -141,14 +141,19 @@ export default function ConversationList({
     <div
       style={{
         background: "#fff",
-        borderRadius: 12,
+        borderRadius: 14,
         border: "1px solid rgba(0,0,0,0.06)",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.02)",
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
         overflow: "hidden",
+        width: "100%",
       }}
     >
+      <style>{`
+        .ms-conv-row:hover { background: rgba(106,23,140,0.04) !important; }
+      `}</style>
       <div style={{ padding: 12, borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
         <input
           type="text"
@@ -235,35 +240,124 @@ function PipelinePill({
 
 function ConvRow({ c, selected, onClick }: { c: ConvSummary; selected: boolean; onClick: () => void }) {
   const isPaid = c.purchase_status === "pagado" || c.paid_at != null || c.status === "pagado";
+  const hasUnread = (c.unread_count ?? 0) > 0;
+  const initials = getInitials(c.lead_name || c.phone || "?");
+  const avatarBg = colorFromString(c.lead_name || c.phone || "");
   return (
     <button
       onClick={onClick}
+      className="ms-conv-row"
       style={{
         width: "100%",
         textAlign: "left",
-        padding: "10px 12px",
-        background: selected ? "rgba(106,23,140,0.06)" : "transparent",
+        padding: "12px 14px",
+        background: selected ? "rgba(106,23,140,0.07)" : "transparent",
         borderLeft: selected ? `3px solid ${PURPLE}` : "3px solid transparent",
         border: "none",
         borderBottom: "1px solid rgba(0,0,0,0.04)",
         cursor: "pointer",
-        display: "block",
+        display: "flex",
+        gap: 11,
+        alignItems: "flex-start",
+        transition: "background 0.12s",
       }}
     >
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 2 }}>
-        <span style={{ fontWeight: 600, fontSize: 13, color: "#1a1a2e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-          {c.lead_name?.trim() || c.phone || "(sin nombre)"}
-        </span>
-        {isPaid && <span style={{ fontSize: 10, color: PURPLE, fontWeight: 700 }}>€ PAGÓ</span>}
-        {c.status === "nuevo" && <span style={{ fontSize: 10, color: "#2563eb", fontWeight: 700 }}>NUEVO</span>}
+      <div
+        style={{
+          width: 38,
+          height: 38,
+          borderRadius: "50%",
+          background: avatarBg,
+          color: "#fff",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 13,
+          fontWeight: 700,
+          flexShrink: 0,
+          letterSpacing: 0.3,
+        }}
+      >
+        {initials}
       </div>
-      <div style={{ fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.last_message ?? "—"}</div>
-      <div style={{ fontSize: 10, color: "#bbb", marginTop: 3, display: "flex", gap: 8 }}>
-        <span>{c.phone}</span>
-        {c.last_message_time && <span>· {fmtRel(c.last_message_time)}</span>}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+          <span
+            style={{
+              fontWeight: hasUnread ? 700 : 600,
+              fontSize: 13.5,
+              color: "#1a1a2e",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              flex: 1,
+              letterSpacing: -0.1,
+            }}
+          >
+            {c.lead_name?.trim() || c.phone || "(sin nombre)"}
+          </span>
+          {c.last_message_time && (
+            <span style={{ fontSize: 10, color: hasUnread ? PURPLE : "#aaa", fontWeight: hasUnread ? 700 : 500, flexShrink: 0 }}>
+              {fmtRel(c.last_message_time)}
+            </span>
+          )}
+        </div>
+        <div
+          style={{
+            fontSize: 11.5,
+            color: hasUnread ? "#444" : "#888",
+            fontWeight: hasUnread ? 600 : 400,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            marginBottom: 3,
+          }}
+        >
+          {c.last_message ?? "—"}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          {isPaid && <Chip color={PURPLE} solid>€ PAGÓ</Chip>}
+          {c.status === "nuevo" && <Chip color="#2563eb">NUEVO</Chip>}
+          {hasUnread && <Chip color={PURPLE} solid>{c.unread_count}</Chip>}
+          {!isPaid && c.status && c.status !== "nuevo" && <Chip color="#64748b">{c.status}</Chip>}
+        </div>
       </div>
     </button>
   );
+}
+
+function Chip({ color, solid, children }: { color: string; solid?: boolean; children: React.ReactNode }) {
+  return (
+    <span
+      style={{
+        fontSize: 9.5,
+        padding: "1px 7px",
+        borderRadius: 4,
+        fontWeight: 700,
+        background: solid ? color : `${color}1a`,
+        color: solid ? "#fff" : color,
+        textTransform: "uppercase",
+        letterSpacing: 0.3,
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function getInitials(name: string): string {
+  const cleaned = name.trim().replace(/^\+?\d+/, "?");
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+function colorFromString(s: string): string {
+  const palette = ["#6A178C", "#2563eb", "#0891b2", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0284c7", "#65a30d", "#c026d3"];
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return palette[Math.abs(h) % palette.length];
 }
 
 function fmtRel(iso: string): string {
