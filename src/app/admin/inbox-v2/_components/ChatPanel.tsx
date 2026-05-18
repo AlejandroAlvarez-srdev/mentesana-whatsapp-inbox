@@ -240,9 +240,25 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
       {/* Header */}
       <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(0,0,0,0.06)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ fontWeight: 700, fontSize: 15, color: "#1a1a2e" }}>{conv.lead_name?.trim() || "(sin nombre)"}</span>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+            <EditableField
+              value={conv.lead_name ?? ""}
+              placeholder="(sin nombre)"
+              fontSize={15}
+              weight={700}
+              color="#1a1a2e"
+              onSave={(v) => patchConv({ lead_name: v.trim() || null } as any)}
+            />
             <span style={{ fontSize: 12, color: "#888" }}>{conv.phone}</span>
+            <EditableField
+              value={(conv as any).email ?? ""}
+              placeholder="+ email"
+              fontSize={11.5}
+              weight={500}
+              color="#666"
+              prefix="✉️"
+              onSave={(v) => patchConv({ email: v.trim() || null } as any)}
+            />
             {(conv.purchase_status === "pagado" || conv.paid_at || conv.status === "pagado") && (
               <Tag label={`PAGÓ ${conv.purchase_amount ?? ""}€`} color={PURPLE} solid />
             )}
@@ -589,6 +605,82 @@ function Bubble({ m }: { m: Message }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function EditableField({
+  value,
+  placeholder,
+  fontSize,
+  weight,
+  color,
+  prefix,
+  onSave,
+}: {
+  value: string;
+  placeholder: string;
+  fontSize: number;
+  weight: number;
+  color: string;
+  prefix?: string;
+  onSave: (v: string) => void | Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { setEditing(false); if (draft !== value) void onSave(draft); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+          if (e.key === "Escape") { setDraft(value); setEditing(false); }
+        }}
+        placeholder={placeholder}
+        style={{
+          fontSize,
+          fontWeight: weight,
+          color,
+          padding: "1px 6px",
+          border: `1px solid ${PURPLE}`,
+          borderRadius: 6,
+          outline: "none",
+          background: "#fff",
+          fontFamily: "inherit",
+          minWidth: 80,
+          maxWidth: 280,
+        }}
+      />
+    );
+  }
+
+  const display = value.trim() || placeholder;
+  const isPlaceholder = !value.trim();
+  return (
+    <span
+      onClick={() => setEditing(true)}
+      title="Click para editar"
+      style={{
+        fontSize,
+        fontWeight: weight,
+        color: isPlaceholder ? "#bbb" : color,
+        cursor: "pointer",
+        padding: "1px 5px",
+        borderRadius: 4,
+        borderBottom: "1px dashed transparent",
+        transition: "all 0.12s",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(106,23,140,0.05)"; e.currentTarget.style.borderBottomColor = `${PURPLE}66`; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderBottomColor = "transparent"; }}
+    >
+      {prefix ? `${prefix} ` : ""}{display}
+    </span>
   );
 }
 
