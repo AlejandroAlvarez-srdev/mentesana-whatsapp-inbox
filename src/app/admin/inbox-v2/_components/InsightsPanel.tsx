@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ConvSummary } from "./ConversationList";
+import PipelinePanel from "@/app/agent/_components/PipelinePanel";
 
 const PURPLE = "#6A178C";
 
@@ -34,7 +35,7 @@ type LeadProfile = {
 
 type TagMaster = { id: string; name: string; color: string; description: string | null };
 
-type Tab = "insights" | "perfil";
+type Tab = "pipeline" | "insights" | "perfil";
 
 export default function InsightsPanel({
   conversationId,
@@ -45,7 +46,7 @@ export default function InsightsPanel({
   selectedSummary: ConvSummary | null;
   apiBase?: string;
 }) {
-  const [tab, setTab] = useState<Tab>("insights");
+  const [tab, setTab] = useState<Tab>("pipeline");
   const [insight, setInsight] = useState<Insight>(null);
   const [risk, setRisk] = useState<RiskResp | null>(null);
   const [profile, setProfile] = useState<LeadProfile | null>(null);
@@ -174,11 +175,27 @@ export default function InsightsPanel({
     <div style={panelStyle}>
       {/* Tabs */}
       <div style={{ display: "flex", padding: 8, gap: 4, borderBottom: "1px solid rgba(0,0,0,0.06)", flexShrink: 0 }}>
+        <TabBtn cur={tab} v="pipeline" set={setTab} label="🎯 Pipeline" />
         <TabBtn cur={tab} v="insights" set={setTab} label="🧠 Insights" />
         <TabBtn cur={tab} v="perfil" set={setTab} label="👤 Perfil" />
       </div>
 
       <div style={{ overflowY: "auto", flex: 1, padding: 14 }}>
+        {tab === "pipeline" && (
+          <>
+            {(profile?.conversation?.phone || selectedSummary?.phone) ? (
+              <PipelinePanel
+                phone={(profile?.conversation?.phone ?? selectedSummary?.phone)!}
+                conversationId={conversationId}
+              />
+            ) : (
+              <div style={{ padding: 24, color: "#aaa", fontSize: 12, textAlign: "center" }}>
+                Selecciona una conversación para ver su pipeline.
+              </div>
+            )}
+          </>
+        )}
+
         {tab === "insights" && (
           <>
             {risk && risk.flag_count > 0 && <RiskBanner risk={risk} />}

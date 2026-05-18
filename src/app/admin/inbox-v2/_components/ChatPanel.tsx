@@ -495,6 +495,7 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
             ✅ VENDIDA{conv.purchase_amount ? ` · ${conv.purchase_amount}€` : ""}
           </span>
         )}
+
       </div>
 
       {/* Banner del número asignado — memoria persistente del routing */}
@@ -601,6 +602,7 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
           onSent={() => { setPaymentModalOpen(false); void loadFull(); }}
         />
       )}
+
     </div>
   );
 }
