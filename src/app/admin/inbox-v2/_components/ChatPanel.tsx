@@ -57,6 +57,8 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   const [psychologists, setPsychologists] = useState<Psychologist[]>([]);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
   const [tplOpen, setTplOpen] = useState(false);
+  const [waNumbers, setWaNumbers] = useState<{ phone_number_id: string; name: string; phone_number: string | null; is_default: boolean; is_pdf_number: boolean }[]>([]);
+  const [assignedNumber, setAssignedNumber] = useState<{ name: string; phone_number_id: string; phone_number: string | null } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastMsgTsRef = useRef<string | null>(null);
 
@@ -95,13 +97,41 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
       fetch(`${apiBase}/tags`, { credentials: "include" }).then((r) => (r.ok ? r.json() : { tags: [] })),
       fetch(`${apiBase}/psychologists`, { credentials: "include" }).then((r) => (r.ok ? r.json() : { psychologists: [] })),
       fetch(`${apiBase}/quick-replies`, { credentials: "include" }).then((r) => (r.ok ? r.json() : { quick_replies: [] })),
-    ]).then(([a, g, p, q]) => {
+      fetch(`${apiBase}/whatsapp-numbers`, { credentials: "include" }).then((r) => (r.ok ? r.json() : { numbers: [] })),
+    ]).then(([a, g, p, q, n]) => {
       setAgents(a.agents ?? []);
       setTags(g.tags ?? []);
       setPsychologists(p.psychologists ?? []);
       setQuickReplies(q.quick_replies ?? []);
+      setWaNumbers((n.numbers ?? []).filter((x: any) => !x.is_pdf_number));
     });
   }, []);
+
+  // Cuando cambia la conversación, leer el número asignado (vía lead-profile)
+  useEffect(() => {
+    if (!conversationId) { setAssignedNumber(null); return; }
+    fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/lead-profile`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setAssignedNumber(d?.assigned_wa_number ?? null));
+  }, [conversationId, apiBase]);
+
+  async function assignNumber(phoneNumberId: string) {
+    if (!conversationId) return;
+    const r = await fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/assign-number`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone_number_id: phoneNumberId }),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      const n = waNumbers.find((x) => x.phone_number_id === phoneNumberId);
+      setAssignedNumber({ name: n?.name ?? d.assigned?.name ?? "?", phone_number_id: phoneNumberId, phone_number: n?.phone_number ?? null });
+    } else {
+      const t = await r.text();
+      setErr(`Asignar número: ${t.slice(0, 200)}`);
+    }
+  }
 
   // Realtime: WebSocket a Supabase, INSERT/UPDATE en messages_mentesana filtrado por conversation_id
   useMessagesRealtime(conversationId, {
@@ -267,6 +297,36 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
               </option>
             );
           })}
+        </select>
+      </div>
+
+      {/* Banner del número asignado — memoria persistente del routing */}
+      <div style={{ padding: "6px 14px", background: assignedNumber ? "rgba(16,185,129,0.06)" : "#fef3c7", borderBottom: "1px solid rgba(0,0,0,0.04)", display: "flex", alignItems: "center", gap: 8, fontSize: 11 }}>
+        {assignedNumber ? (
+          <>
+            <span style={{ color: "#065f46", fontWeight: 700 }}>📲 Enviando y recibiendo en:</span>
+            <strong style={{ color: "#065f46" }}>{assignedNumber.name?.trim()}</strong>
+            {assignedNumber.phone_number && <span style={{ color: "#888" }}>· {assignedNumber.phone_number}</span>}
+            <span style={{ marginLeft: 4, fontSize: 9, fontFamily: "ui-monospace, monospace", color: "#aaa" }}>{assignedNumber.phone_number_id}</span>
+          </>
+        ) : (
+          <>
+            <span style={{ color: "#92400e", fontWeight: 700 }}>⚠️ Esta conversación no tiene número asignado</span>
+            <span style={{ color: "#92400e" }}>· se enviará desde el default · asígnalo →</span>
+          </>
+        )}
+        <select
+          value={assignedNumber?.phone_number_id ?? ""}
+          onChange={(e) => { const v = e.target.value; if (v && v !== assignedNumber?.phone_number_id) void assignNumber(v); }}
+          style={{ marginLeft: "auto", padding: "3px 8px", fontSize: 11, border: "1px solid rgba(0,0,0,0.1)", borderRadius: 5, background: "#fff", cursor: "pointer" }}
+          title="Cambiar número (queda guardado en conversation_routing + kv_store)"
+        >
+          <option value="">— cambiar número —</option>
+          {waNumbers.map((n) => (
+            <option key={n.phone_number_id} value={n.phone_number_id}>
+              {n.name?.trim()}{n.phone_number ? ` · ${n.phone_number}` : ""}{n.is_default ? " · default" : ""}
+            </option>
+          ))}
         </select>
       </div>
 
