@@ -63,6 +63,9 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   const [windowInfo, setWindowInfo] = useState<WindowInfo | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastMsgTsRef = useRef<string | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [savingSale, setSavingSale] = useState(false);
 
   const loadFull = useCallback(async () => {
     if (!conversationId) return;
@@ -195,6 +198,68 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
     document.addEventListener("visibilitychange", onVis);
     return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
   }, [conversationId, apiBase]);
+
+  // Older messages endpoint: deriva de apiBase
+  // /api/admin/inbox-v2  → /api/admin/inbox-v2-messages-older
+  // /api/agent/inbox     → /api/agent/inbox-messages-older
+  const olderEndpoint = apiBase.includes("/agent/")
+    ? "/api/agent/inbox-messages-older"
+    : "/api/admin/inbox-v2-messages-older";
+
+  async function loadOlderMessages() {
+    if (!conversationId || loadingOlder || !hasMoreOlder || messages.length === 0) return;
+    const before = messages[0].timestamp;
+    const el = scrollRef.current;
+    const prevHeight = el?.scrollHeight ?? 0;
+    const prevTop = el?.scrollTop ?? 0;
+    setLoadingOlder(true);
+    try {
+      const r = await fetch(`${olderEndpoint}?conv=${encodeURIComponent(conversationId)}&before=${encodeURIComponent(before)}&limit=80`, { credentials: "include" });
+      if (!r.ok) return;
+      const d = await r.json();
+      const older: Message[] = d.messages ?? [];
+      if (older.length === 0) { setHasMoreOlder(false); return; }
+      setMessages((prev) => {
+        const existing = new Set(prev.map((m) => m.id));
+        const fresh = older.filter((m) => !existing.has(m.id));
+        return [...fresh, ...prev];
+      });
+      setHasMoreOlder(d.has_more === true);
+      // Preservar posición de scroll: tras el re-render, scrollTop = nuevaAltura - oldHeight + oldTop
+      requestAnimationFrame(() => {
+        if (!el) return;
+        el.scrollTop = el.scrollHeight - prevHeight + prevTop;
+      });
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
+
+  // Reset hasMoreOlder cuando cambia conv
+  useEffect(() => { setHasMoreOlder(true); }, [conversationId]);
+
+  // Marcar como vendida — pide importe y guarda
+  async function markAsSold() {
+    if (!conversationId || savingSale) return;
+    const input = window.prompt("Importe de la venta en € (deja vacío si no lo sabes):", "");
+    if (input === null) return; // canceló
+    const amount = input.trim() ? Number(input.trim().replace(",", ".")) : null;
+    if (amount != null && (isNaN(amount) || amount < 0)) {
+      alert("Importe inválido");
+      return;
+    }
+    setSavingSale(true);
+    try {
+      await patchConv({
+        status: "pagado",
+        purchase_status: "pagado",
+        purchase_amount: amount,
+        paid_at: new Date().toISOString(),
+      } as any);
+    } finally {
+      setSavingSale(false);
+    }
+  }
 
   // Auto-scroll al fondo del chat — SOLO si el usuario ya estaba cerca del fondo (no rompe lectura).
   const lastScrollHeightRef = useRef(0);
@@ -341,6 +406,76 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
             );
           })}
         </select>
+
+        {/* Toggle ventas / soporte */}
+        <div style={{ display: "flex", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6, overflow: "hidden" }} title="Cambia el tipo de conversación">
+          <button
+            type="button"
+            onClick={() => patchConv({ client_type: "ventas" } as any)}
+            style={{
+              padding: "5px 10px",
+              fontSize: 11,
+              fontWeight: 700,
+              border: "none",
+              cursor: "pointer",
+              background: (conv as any).client_type === "ventas" ? PURPLE : "#fff",
+              color: (conv as any).client_type === "ventas" ? "#fff" : "#475569",
+            }}
+          >💼 Ventas</button>
+          <button
+            type="button"
+            onClick={() => patchConv({ client_type: "soporte" } as any)}
+            style={{
+              padding: "5px 10px",
+              fontSize: 11,
+              fontWeight: 700,
+              border: "none",
+              borderLeft: "1px solid rgba(0,0,0,0.1)",
+              cursor: "pointer",
+              background: (conv as any).client_type === "soporte" ? "#0891b2" : "#fff",
+              color: (conv as any).client_type === "soporte" ? "#fff" : "#475569",
+            }}
+          >🛟 Soporte</button>
+        </div>
+
+        {/* Marcar como vendida */}
+        {!(conv.purchase_status === "pagado" || conv.paid_at || conv.status === "pagado") ? (
+          <button
+            type="button"
+            onClick={markAsSold}
+            disabled={savingSale}
+            title="Marcar conversación como vendida (registra importe + fecha)"
+            style={{
+              padding: "5px 12px",
+              fontSize: 11,
+              fontWeight: 800,
+              borderRadius: 6,
+              border: "none",
+              cursor: savingSale ? "default" : "pointer",
+              background: savingSale ? "rgba(0,0,0,0.08)" : "linear-gradient(135deg, #16a34a 0%, #22c55e 100%)",
+              color: savingSale ? "#888" : "#fff",
+              boxShadow: savingSale ? "none" : "0 2px 8px rgba(22,163,74,0.3)",
+              letterSpacing: 0.3,
+            }}
+          >
+            {savingSale ? "⏳" : "💰 Marcar vendida"}
+          </button>
+        ) : (
+          <span
+            style={{
+              padding: "5px 10px",
+              fontSize: 10.5,
+              fontWeight: 800,
+              borderRadius: 6,
+              background: "rgba(16,185,129,0.14)",
+              color: "#065f46",
+              letterSpacing: 0.4,
+            }}
+            title={`Pagó ${conv.purchase_amount ?? ""}€ ${conv.paid_at ? `el ${new Date(conv.paid_at).toLocaleDateString("es-ES")}` : ""}`}
+          >
+            ✅ VENDIDA{conv.purchase_amount ? ` · ${conv.purchase_amount}€` : ""}
+          </span>
+        )}
       </div>
 
       {/* Banner del número asignado — memoria persistente del routing */}
@@ -379,7 +514,26 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
       )}
 
       {/* messages */}
-      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "16px 14px", background: "#FAFAFA" }}>
+      <div
+        ref={scrollRef}
+        onScroll={(e) => {
+          // Si el usuario se acerca al top (<60px) y aún quedan mensajes viejos → cargar más
+          if (e.currentTarget.scrollTop < 60 && hasMoreOlder && !loadingOlder && messages.length > 0) {
+            void loadOlderMessages();
+          }
+        }}
+        style={{ flex: 1, overflowY: "auto", padding: "16px 14px", background: "#FAFAFA" }}
+      >
+        {hasMoreOlder && messages.length > 0 && (
+          <div style={{ textAlign: "center", padding: "6px 0", fontSize: 11, color: "#888" }}>
+            {loadingOlder ? "⏳ Cargando mensajes anteriores…" : "⬆ Scrollea arriba para ver más"}
+          </div>
+        )}
+        {!hasMoreOlder && messages.length > 20 && (
+          <div style={{ textAlign: "center", padding: "6px 0", fontSize: 10, color: "#bbb", fontStyle: "italic" }}>
+            ✓ Inicio de la conversación
+          </div>
+        )}
         {messages.length === 0 && <div style={{ textAlign: "center", color: "#aaa", fontSize: 12, padding: 30 }}>Sin mensajes.</div>}
         {messages.map((m) => <Bubble key={m.id} m={m} />)}
       </div>
