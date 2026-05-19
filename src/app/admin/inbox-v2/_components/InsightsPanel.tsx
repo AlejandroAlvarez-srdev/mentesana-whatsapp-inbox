@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ConvSummary } from "./ConversationList";
 import PipelinePanel from "@/app/agent/_components/PipelinePanel";
 import EmailSuggestModal from "./EmailSuggestModal";
+import AmeliaToolsTab from "./AmeliaToolsTab";
 
 const PURPLE = "#6A178C";
 
@@ -36,7 +37,7 @@ type LeadProfile = {
 
 type TagMaster = { id: string; name: string; color: string; description: string | null };
 
-type Tab = "pipeline" | "insights" | "perfil";
+type Tab = "pipeline" | "insights" | "perfil" | "amelia";
 
 export default function InsightsPanel({
   conversationId,
@@ -209,6 +210,7 @@ export default function InsightsPanel({
         <TabBtn cur={tab} v="pipeline" set={setTab} label="🎯 Pipeline" />
         <TabBtn cur={tab} v="insights" set={setTab} label="🧠 Insights" />
         <TabBtn cur={tab} v="perfil" set={setTab} label="👤 Perfil" />
+        <TabBtn cur={tab} v="amelia" set={setTab} label="🛠️ Amelia" />
       </div>
 
       <div style={{ overflowY: "auto", flex: 1, padding: 14 }}>
@@ -262,6 +264,14 @@ export default function InsightsPanel({
             onPatchField={patchField}
             loading={loading}
             onOpenEmailModal={() => setEmailModalOpen(true)}
+          />
+        )}
+
+        {tab === "amelia" && (
+          <AmeliaToolsTab
+            phone={profile?.conversation?.phone ?? selectedSummary?.phone ?? null}
+            email={profile?.contact?.email ?? profile?.conversation?.email ?? null}
+            conversationId={conversationId}
           />
         )}
       </div>
