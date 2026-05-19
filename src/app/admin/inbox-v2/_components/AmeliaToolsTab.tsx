@@ -101,9 +101,7 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
                   });
                   const d = await r.json();
                   if (r.ok) { alert("✅ Cita cancelada"); void load(); }
-                  else if (d.error === "amelia_rest_not_configured") {
-                    if (confirm("⚠️ API Amelia no configurada. ¿Abrir Amelia admin para cancelar manual?")) window.open(d.admin_url, "_blank");
-                  } else alert("❌ " + (d.message ?? d.error));
+                  else alert("❌ " + (d.error ?? "Error cancelando"));
                 }}
               />
             ))}
@@ -261,14 +259,13 @@ function ScheduleModal({ customerId, customerName, service, conversationId, onCl
           provider_id: service.provider_id,
           service_id: service.service_id,
           new_start_utc: picked,
+          package_customer_service_id: service.id, // vincula al bono
           conversation_id: conversationId,
         }),
       });
       const d = await r.json();
-      if (r.ok) { alert(`✅ Cita agendada para ${customerName}`); onScheduled(); }
-      else if (d.error === "amelia_rest_not_configured") {
-        if (confirm("⚠️ API Amelia no configurada. ¿Abrir Amelia admin para crear la cita?")) window.open(d.admin_url, "_blank");
-      } else alert("❌ " + (d.message ?? d.error));
+      if (r.ok) { alert(`✅ Cita agendada para ${customerName} (descontada del bono)`); onScheduled(); }
+      else alert("❌ " + (d.error ?? "Error agendando"));
     } finally { setSaving(false); }
   }
 
@@ -341,9 +338,7 @@ function RescheduleModal({ appt, conversationId, onClose, onRescheduled }: { app
       });
       const d = await r.json();
       if (r.ok) { alert("✅ Cita reagendada"); onRescheduled(); }
-      else if (d.error === "amelia_rest_not_configured") {
-        if (confirm("⚠️ API Amelia no configurada. ¿Abrir Amelia admin?")) window.open(d.admin_url, "_blank");
-      } else alert("❌ " + (d.message ?? d.error));
+      else alert("❌ " + (d.error ?? "Error reagendando"));
     } finally { setSaving(false); }
   }
 
