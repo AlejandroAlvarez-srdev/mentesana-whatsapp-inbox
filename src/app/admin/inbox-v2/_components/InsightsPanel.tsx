@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ConvSummary } from "./ConversationList";
 import PipelinePanel from "@/app/agent/_components/PipelinePanel";
+import EmailSuggestModal from "./EmailSuggestModal";
 
 const PURPLE = "#6A178C";
 
@@ -178,6 +179,8 @@ export default function InsightsPanel({
     refreshProfile();
   }
 
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+
   if (!conversationId) {
     return <div style={panelStyle}><div style={{ color: "#aaa", fontSize: 12, padding: 20, textAlign: "center" }}>Selecciona una conversación.</div></div>;
   }
@@ -258,9 +261,19 @@ export default function InsightsPanel({
             onSaveNotes={saveNotes}
             onPatchField={patchField}
             loading={loading}
+            onOpenEmailModal={() => setEmailModalOpen(true)}
           />
         )}
       </div>
+      {emailModalOpen && (
+        <EmailSuggestModal
+          conversationId={conversationId}
+          initialEmail={profile?.contact?.email ?? profile?.conversation?.email ?? null}
+          initialName={profile?.contact?.lead_name ?? profile?.conversation?.lead_name ?? null}
+          onClose={() => setEmailModalOpen(false)}
+          onSent={() => { /* podríamos refrescar timeline */ }}
+        />
+      )}
     </div>
   );
 }
@@ -273,6 +286,7 @@ function ProfileTab({
   onSaveNotes,
   onPatchField,
   loading,
+  onOpenEmailModal,
 }: {
   profile: LeadProfile | null;
   tagMaster: TagMaster[];
@@ -281,6 +295,7 @@ function ProfileTab({
   onSaveNotes: (notes: string) => void;
   onPatchField: (field: string, value: string | null) => Promise<void>;
   loading: boolean;
+  onOpenEmailModal?: () => void;
 }) {
   const [notes, setNotes] = useState("");
   const [notesDirty, setNotesDirty] = useState(false);
@@ -344,6 +359,26 @@ function ProfileTab({
             </div>
           </details>
         )}
+      </Section>
+
+      <Section title="✉️ Acciones rápidas">
+        <div style={{ display: "flex", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => onOpenEmailModal?.()}
+            disabled={!c?.email}
+            title={c?.email ? `Sugerir email a ${c.email}` : "Añade un email al perfil primero"}
+            style={{
+              padding: "7px 12px", fontSize: 11.5, fontWeight: 800, borderRadius: 8, border: "none",
+              cursor: c?.email ? "pointer" : "not-allowed",
+              background: c?.email ? "linear-gradient(135deg, #6A178C 0%, #8B2FB5 100%)" : "rgba(0,0,0,0.08)",
+              color: c?.email ? "#fff" : "#888",
+              letterSpacing: 0.3,
+              boxShadow: c?.email ? "0 2px 8px rgba(106,23,140,0.3)" : "none",
+            }}
+          >✉️ Sugerir email con IA</button>
+        </div>
+        {!c?.email && <div style={{ fontSize: 10.5, color: "#aaa", marginBottom: 4 }}>Añade un email arriba para habilitar.</div>}
       </Section>
 
       <Section title="💳 Pagos / Cobrar">
