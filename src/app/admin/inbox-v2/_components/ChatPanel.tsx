@@ -390,6 +390,52 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
           </div>
         </div>
 
+        {/* Pipeline / etapa */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 3, flexShrink: 0 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.4 }}>Etapa</span>
+          <select
+            value={conv.status ?? "sin_contactar"}
+            onChange={async (e) => {
+              const newStatus = e.target.value;
+              const r = await fetch("/api/agent/conversation-status", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ conversation_id: conv.id, status: newStatus }),
+              });
+              if (r.ok) {
+                setConv((c) => c ? ({ ...c, status: newStatus } as any) : c);
+              } else {
+                setErr(`Cambiar etapa: ${r.status}`);
+              }
+            }}
+            title="Etapa del pipeline (drag&drop disponible en /agent/pipelines)"
+            style={{
+              padding: "5px 24px 5px 10px",
+              fontSize: 11,
+              fontWeight: 700,
+              border: "1px solid rgba(0,0,0,0.1)",
+              borderRadius: 8,
+              background: stageColor(conv.status) + "1a",
+              color: stageColor(conv.status),
+              cursor: "pointer",
+              fontFamily: "inherit",
+              appearance: "none",
+              backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%236A178C' d='M5 6L0 0h10z'/%3E%3C/svg%3E\")",
+              backgroundRepeat: "no-repeat",
+              backgroundPosition: "right 7px center",
+            }}
+          >
+            <option value="sin_contactar">📭 Sin contactar</option>
+            <option value="seguimiento_1">1️⃣ Seguimiento 1</option>
+            <option value="seguimiento_2">2️⃣ Seguimiento 2</option>
+            <option value="seguimiento_3">3️⃣ Seguimiento 3</option>
+            <option value="seguimiento_4">4️⃣ Seguimiento 4</option>
+            <option value="pagado">💰 Pagaron</option>
+            <option value="perdido">❌ Perdido</option>
+          </select>
+        </div>
+
         {/* Psicóloga (fuente: Amelia) */}
         <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: "1 1 200px", minWidth: 160 }}>
           <span style={{ fontSize: 9, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.4 }}>Psicóloga · Amelia</span>
@@ -1061,6 +1107,18 @@ function fmtTime(iso: string): string {
 }
 
 const emptyStyle: React.CSSProperties = { background: "#fff", borderRadius: 12, border: "1px solid rgba(0,0,0,0.06)", display: "flex", alignItems: "center", justifyContent: "center" };
+
+function stageColor(status: string | null): string {
+  switch (status) {
+    case "seguimiento_1": return "#1e40af";
+    case "seguimiento_2": return "#7c3aed";
+    case "seguimiento_3": return "#a855f7";
+    case "seguimiento_4": return "#c026d3";
+    case "pagado": return "#065f46";
+    case "perdido": return "#991b1b";
+    default: return "#475569";
+  }
+}
 const selectStyle: React.CSSProperties = {
   padding: "5px 8px",
   fontSize: 12,
