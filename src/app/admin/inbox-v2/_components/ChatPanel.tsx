@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import TemplatesModal from "./TemplatesModal";
 import ProposeAppointmentModal from "./ProposeAppointmentModal";
+import ChatExtrasMenu from "./ChatExtrasMenu";
 import WindowBadge, { WindowInfo, fmtMinutesLeft, colorFor } from "./WindowBadge";
 import { useMessagesRealtime } from "../_hooks/useInboxRealtime";
 
@@ -496,6 +497,9 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
             ))}
           </select>
         </div>
+
+        {/* Menú rápido: añadir a lista + asignar tarea */}
+        <ChatExtrasMenu conversationId={conv.id} leadName={conv.lead_name} phone={conv.phone} />
 
         {/* Indicador pagó (read-only, sutil) */}
         {(conv.purchase_status === "pagado" || conv.paid_at || conv.status === "pagado") && (
