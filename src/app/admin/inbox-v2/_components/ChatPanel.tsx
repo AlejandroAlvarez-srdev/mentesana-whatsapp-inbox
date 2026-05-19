@@ -515,7 +515,7 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
               flexShrink: 0,
               alignSelf: "flex-end",
             }}
-            title={`Pagó ${conv.purchase_amount ?? ""}€ ${conv.paid_at ? `el ${new Date(conv.paid_at).toLocaleDateString("es-ES")}` : ""}`}
+            title={`Pagó ${conv.purchase_amount ?? ""}€ ${conv.paid_at ? `el ${new Date(conv.paid_at).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid" })}` : ""}`}
           >
             ✅ {conv.purchase_amount ? `${conv.purchase_amount}€` : "PAGÓ"}
           </span>
@@ -1237,11 +1237,11 @@ function WindowBanner({ info }: { info: WindowInfo }) {
       {info.expires_at && info.window_status !== "expired" && info.window_status !== "never_inbound" && (
         <>
           <span style={{ color: c.fg }}>· quedan <strong>{fmtMinutesLeft(live)}</strong></span>
-          <span style={{ color: c.fg, opacity: 0.7 }}>· expira {new Date(info.expires_at).toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+          <span style={{ color: c.fg, opacity: 0.7 }}>· expira {new Date(info.expires_at).toLocaleString("es-ES", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
         </>
       )}
       {info.window_status === "expired" && info.last_inbound_at && (
-        <span style={{ color: c.fg, opacity: 0.7 }}>· última inbound {new Date(info.last_inbound_at).toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+        <span style={{ color: c.fg, opacity: 0.7 }}>· última inbound {new Date(info.last_inbound_at).toLocaleString("es-ES", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
       )}
       {cta}
     </div>

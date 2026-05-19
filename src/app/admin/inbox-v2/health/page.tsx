@@ -116,7 +116,7 @@ export default function HealthPage() {
     <div style={{ maxWidth: 1280 }}>
       <header style={{ marginBottom: 20, display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "#1a1a2e", margin: 0 }}>🩺 Salud del inbox</h1>
-        <span style={{ fontSize: 12, color: "#888" }}>actualizado {new Date(data.generated_at).toLocaleTimeString("es-ES")}</span>
+        <span style={{ fontSize: 12, color: "#888" }}>actualizado {new Date(data.generated_at).toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid" })}</span>
         <span style={{ marginLeft: "auto", fontSize: 11, padding: "4px 10px", borderRadius: 6, background: rtConnected ? "rgba(16,185,129,0.12)" : "rgba(245,158,11,0.12)", color: rtConnected ? "#065f46" : "#92400e", fontWeight: 700 }}>
           {rtConnected ? "● REALTIME CONECTADO" : "○ Realtime conectando…"}
         </span>
@@ -171,7 +171,7 @@ export default function HealthPage() {
                   <Td right><strong>{n.msgs_inbound_24h}</strong></Td>
                   <Td right>{n.msgs_outbound_24h}</Td>
                   <Td right>{n.conversations_active_7d}</Td>
-                  <Td>{n.last_inbound_at ? <span style={{ fontSize: 11 }}>{new Date(n.last_inbound_at).toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span> : <span style={{ color: "#aaa" }}>—</span>}</Td>
+                  <Td>{n.last_inbound_at ? <span style={{ fontSize: 11 }}>{new Date(n.last_inbound_at).toLocaleString("es-ES", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span> : <span style={{ color: "#aaa" }}>—</span>}</Td>
                   <Td>
                     {isStale ? <Tag color="#dc2626" label="🔴 inactivo > 7d" /> : isHealthy ? <Tag color="#10b981" label="🟢 sano" /> : <Tag color="#f59e0b" label="🟡 lento" />}
                   </Td>
@@ -193,7 +193,7 @@ export default function HealthPage() {
             const isInbound = m.is_inbound === true || (m.lead_phone && m.sender === m.lead_phone);
             return (
               <div key={m.id} style={{ display: "grid", gridTemplateColumns: "80px 40px 200px 1fr", gap: 10, padding: "6px 10px", borderRadius: 6, background: "rgba(241,245,249,0.04)" }}>
-                <span style={{ color: "#64748b" }}>{new Date(m.timestamp).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                <span style={{ color: "#64748b" }}>{new Date(m.timestamp).toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
                 <span style={{ color: isInbound ? "#22d3ee" : "#fbbf24", fontWeight: 700 }}>{isInbound ? "← IN" : "→ OUT"}</span>
                 <span style={{ color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.lead_name ?? m.sender_name ?? m.sender}</span>
                 <span style={{ color: "#f1f5f9", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

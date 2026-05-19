@@ -136,8 +136,8 @@ export default function ProposeAppointmentModal({
               </p>
               {Array.from(byDay.entries()).map(([day, ss]) => {
                 const d = new Date(day);
-                const weekday = d.toLocaleDateString("es-ES", { weekday: "long" });
-                const dayLabel = d.toLocaleDateString("es-ES", { day: "numeric", month: "long" });
+                const weekday = d.toLocaleDateString("es-ES", { timeZone: "Europe/Madrid", weekday: "long" });
+                const dayLabel = d.toLocaleDateString("es-ES", { timeZone: "Europe/Madrid", day: "numeric", month: "long" });
                 return (
                   <div key={day} style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>

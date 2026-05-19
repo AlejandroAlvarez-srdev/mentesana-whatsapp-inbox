@@ -241,7 +241,7 @@ export default function NumbersAdminPage() {
                   <Td>
                     {h?.last_inbound_at ? (
                       <div>
-                        <div style={{ fontSize: 11 }}>{new Date(h.last_inbound_at).toLocaleDateString("es-ES", { day: "2-digit", month: "short" })}</div>
+                        <div style={{ fontSize: 11 }}>{new Date(h.last_inbound_at).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid", day: "2-digit", month: "short" })}</div>
                         <div style={{ fontSize: 10, color: stale ? "#dc2626" : "#888" }}>{relativeAge(h.last_inbound_at)}</div>
                       </div>
                     ) : <span style={{ color: "#aaa" }}>—</span>}

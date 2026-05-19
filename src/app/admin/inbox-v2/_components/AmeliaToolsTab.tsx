@@ -209,8 +209,8 @@ function PackageCard({ p, onSchedule }: { p: Package; onSchedule: (svc: PackageS
         {expired && <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "rgba(239,68,68,0.1)", color: "#991b1b", fontWeight: 700 }}>VENCIDO</span>}
       </div>
       <div style={{ fontSize: 10, color: "#888", marginTop: 2 }}>
-        {p.start && <span>desde {new Date(p.start).toLocaleDateString("es-ES")}</span>}
-        {p.end && <span> · hasta {new Date(p.end).toLocaleDateString("es-ES")}</span>}
+        {p.start && <span>desde {new Date(p.start).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid" })}</span>}
+        {p.end && <span> · hasta {new Date(p.end).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid" })}</span>}
       </div>
       {p.services.length > 0 && (
         <div style={{ marginTop: 8, display: "grid", gap: 5 }}>
@@ -357,7 +357,7 @@ function ScheduleModal({ customerId, customerName, service, conversationId, onCl
             return (
               <div key={day} style={{ marginBottom: 10 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", marginBottom: 5 }}>
-                  {d.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}
+                  {d.toLocaleDateString("es-ES", { timeZone: "Europe/Madrid", weekday: "long", day: "numeric", month: "long" })}
                 </div>
                 <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                   {ss.map((s) => {
@@ -433,7 +433,7 @@ function RescheduleModal({ appt, conversationId, onClose, onRescheduled }: { app
             return (
               <div key={day} style={{ marginBottom: 10 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#888", textTransform: "uppercase", marginBottom: 5 }}>
-                  {d.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}
+                  {d.toLocaleDateString("es-ES", { timeZone: "Europe/Madrid", weekday: "long", day: "numeric", month: "long" })}
                 </div>
                 <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                   {ss.map((s) => {

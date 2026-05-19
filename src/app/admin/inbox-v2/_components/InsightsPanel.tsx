@@ -435,7 +435,7 @@ function ProfileTab({
                 <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>
                   {p.psychologist && <span>👩‍⚕️ {p.psychologist} · </span>}
                   {p.source && <span>{p.source} · </span>}
-                  {new Date(p.created_at).toLocaleDateString("es-ES")}
+                  {new Date(p.created_at).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid" })}
                 </div>
               </div>
             ))}
