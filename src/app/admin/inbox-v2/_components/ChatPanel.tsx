@@ -46,6 +46,7 @@ type Conversation = {
 type Agent = { id: string; name: string; email: string; agent_type: string | null };
 type TagItem = { id: string; name: string; color: string };
 type Psychologist = { id: string; name: string; specialty: string | null; years_experience: number | null; current_patients: number | null; max_patients: number | null; is_accepting_patients: boolean };
+type AmeliaProvider = { id: number; first_name: string; last_name: string; name: string; email: string | null; phone: string | null; upcoming_count: number };
 type QuickReply = { id: string; title: string; content: string; shortcut: string | null; usage_count: number };
 
 const STATUSES = ["nuevo", "contactado", "asignado", "pagado", "cerrado"] as const;
@@ -58,6 +59,7 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   const [agents, setAgents] = useState<Agent[]>([]);
   const [tags, setTags] = useState<TagItem[]>([]);
   const [psychologists, setPsychologists] = useState<Psychologist[]>([]);
+  const [ameliaProviders, setAmeliaProviders] = useState<AmeliaProvider[]>([]);
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
   const [tplOpen, setTplOpen] = useState(false);
   const [waNumbers, setWaNumbers] = useState<{ phone_number_id: string; name: string; phone_number: string | null; is_default: boolean; is_pdf_number: boolean }[]>([]);
@@ -129,12 +131,14 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
       fetch(`${apiBase}/psychologists`, { credentials: "include" }).then((r) => (r.ok ? r.json() : { psychologists: [] })),
       fetch(`${apiBase}/quick-replies`, { credentials: "include" }).then((r) => (r.ok ? r.json() : { quick_replies: [] })),
       fetch(`${apiBase}/whatsapp-numbers`, { credentials: "include" }).then((r) => (r.ok ? r.json() : { numbers: [] })),
-    ]).then(([a, g, p, q, n]) => {
+      fetch(`/api/agent/amelia/providers`, { credentials: "include" }).then((r) => (r.ok ? r.json() : { providers: [] })),
+    ]).then(([a, g, p, q, n, ap]) => {
       setAgents(a.agents ?? []);
       setTags(g.tags ?? []);
       setPsychologists(p.psychologists ?? []);
       setQuickReplies(q.quick_replies ?? []);
       setWaNumbers((n.numbers ?? []).filter((x: any) => !x.is_pdf_number));
+      setAmeliaProviders(ap.providers ?? []);
     });
   }, []);
 
@@ -386,28 +390,42 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
           </div>
         </div>
 
-        {/* Psicóloga */}
+        {/* Psicóloga (fuente: Amelia) */}
         <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: "1 1 200px", minWidth: 160 }}>
-          <span style={{ fontSize: 9, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.4 }}>Psicóloga</span>
+          <span style={{ fontSize: 9, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.4 }}>Psicóloga · Amelia</span>
           <select
-            value={(conv as any).assigned_psychologist ?? ""}
-            onChange={(e) => {
-              const psyId = e.target.value || null;
-              const psy = psychologists.find((p) => p.id === psyId);
-              patchConv({ assigned_psychologist: psyId, assigned_psychologist_name: psy?.name ?? null } as any);
+            value={String((conv as any).assigned_provider_amelia_id ?? "")}
+            onChange={async (e) => {
+              const id = e.target.value ? Number(e.target.value) : null;
+              const prov = ameliaProviders.find((p) => p.id === id);
+              // Bypass edge function (whitelist no conoce assigned_provider_amelia_id)
+              const r = await fetch(`/api/agent/conversations/${encodeURIComponent(conv.id)}/patch-provider`, {
+                method: "PATCH",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ assigned_provider_amelia_id: id, assigned_psychologist_name: prov?.name ?? null }),
+              });
+              if (r.ok) {
+                setConv((c) => c ? ({ ...c, assigned_provider_amelia_id: id, assigned_psychologist_name: prov?.name ?? null, assigned_psychologist: null } as any) : c);
+              } else {
+                setErr(`Error asignando psicóloga: ${r.status}`);
+              }
             }}
             style={{ ...selectStyle, width: "100%" }}
-            title="Psicóloga asignada"
+            title="Psicóloga asignada · 53 visibles en Amelia"
           >
             <option value="">— sin asignar —</option>
-            {psychologists.map((p) => {
-              const full = p.current_patients != null && p.max_patients != null && p.current_patients >= p.max_patients;
-              return (
-                <option key={p.id} value={p.id} disabled={!p.is_accepting_patients}>
-                  {p.name?.trim()}{p.specialty ? ` · ${p.specialty}` : ""}{full ? " ⚠️" : ""}
-                </option>
-              );
-            })}
+            {ameliaProviders.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}{p.upcoming_count > 0 ? ` · ${p.upcoming_count} próximas` : ""}
+              </option>
+            ))}
+            {/* Fallback al sistema viejo si hay UUID no migrado */}
+            {(conv as any).assigned_psychologist && !(conv as any).assigned_provider_amelia_id && (
+              <option value="" disabled style={{ fontStyle: "italic" }}>
+                (legacy: {(conv as any).assigned_psychologist_name ?? "uuid asignada antes"})
+              </option>
+            )}
           </select>
         </div>
 
@@ -558,9 +576,11 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
 
       {proposeOpen && (
         <ProposeAppointmentModal
-          psychologistId={(conv as any).assigned_psychologist ?? null}
+          providerAmeliaId={(conv as any).assigned_provider_amelia_id ?? null}
           psychologistName={conv.assigned_psychologist_name}
           leadName={conv.lead_name}
+          leadPhone={conv.phone}
+          leadEmail={(conv as any).email ?? null}
           onClose={() => setProposeOpen(false)}
           onInsertText={(text) => {
             window.dispatchEvent(new CustomEvent("inbox:insert-composer", { detail: { text } }));

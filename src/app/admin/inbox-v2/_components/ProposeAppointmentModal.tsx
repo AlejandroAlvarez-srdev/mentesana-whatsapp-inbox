@@ -7,15 +7,19 @@ const PURPLE = "#6A178C";
 type Slot = { day: string; weekday: string; hour: number; iso: string };
 
 export default function ProposeAppointmentModal({
-  psychologistId,
+  providerAmeliaId,
   psychologistName,
   leadName,
+  leadPhone,
+  leadEmail,
   onClose,
   onInsertText,
 }: {
-  psychologistId: string | null;
+  providerAmeliaId: number | null;
   psychologistName: string | null;
   leadName: string | null;
+  leadPhone: string | null;
+  leadEmail: string | null;
   onClose: () => void;
   onInsertText: (text: string) => void;
 }) {
@@ -23,22 +27,30 @@ export default function ProposeAppointmentModal({
   const [loading, setLoading] = useState(true);
   const [picked, setPicked] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
-  const [resolvedName, setResolvedName] = useState<string | null>(null);
   const [bookingUrl, setBookingUrl] = useState("https://mentesanapsicologia.com/reservar");
+  const [upcomingMeets, setUpcomingMeets] = useState<{ id: number; booking_start: string; google_meet_url: string | null; provider_name: string; service_name: string | null }[]>([]);
 
   useEffect(() => {
-    if (!psychologistId) { setLoading(false); return; }
+    if (!providerAmeliaId) { setLoading(false); return; }
     setLoading(true);
-    fetch(`/api/agent/amelia/free-slots?psychologist_id=${encodeURIComponent(psychologistId)}`, { credentials: "include" })
+    fetch(`/api/agent/amelia/free-slots?provider_id=${providerAmeliaId}`, { credentials: "include" })
       .then((r) => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
-      .then((d) => {
-        setSlots(d.slots ?? []);
-        if (d.resolved?.name) setResolvedName(d.resolved.name);
-        if (d.error === "no_amelia_provider_match") setErr("No se encontró match Amelia para esta psicóloga (busqué por email y nombre).");
-      })
+      .then((d) => { setSlots(d.slots ?? []); })
       .catch((e) => setErr(String(e)))
       .finally(() => setLoading(false));
-  }, [psychologistId]);
+  }, [providerAmeliaId]);
+
+  // Carga citas próximas YA reservadas (con googleMeetUrl) para este lead
+  useEffect(() => {
+    if (!leadPhone && !leadEmail) return;
+    const qs = new URLSearchParams();
+    if (leadPhone) qs.set("phone", leadPhone);
+    if (leadEmail) qs.set("email", leadEmail);
+    fetch(`/api/agent/amelia/upcoming-meet?${qs}`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => setUpcomingMeets((d?.appointments ?? []).filter((a: any) => a.google_meet_url)))
+      .catch(() => {});
+  }, [leadPhone, leadEmail]);
 
   function toggle(iso: string) {
     setPicked((p) => p.includes(iso) ? p.filter((x) => x !== iso) : [...p, iso].slice(0, 3));
@@ -84,14 +96,35 @@ export default function ProposeAppointmentModal({
         </header>
 
         <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
-          {!psychologistId && (
+          {!providerAmeliaId && (
             <div style={{ padding: 16, background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, fontSize: 12, color: "#92400e", marginBottom: 12 }}>
               ⚠️ La conversación no tiene psicóloga asignada. Asígnale una en el header del chat.
             </div>
           )}
-          {resolvedName && resolvedName !== psychologistName && (
-            <div style={{ padding: 10, background: "rgba(106,23,140,0.04)", border: `1px solid ${PURPLE}33`, borderRadius: 8, fontSize: 11.5, color: PURPLE, marginBottom: 10 }}>
-              ✓ Matcheado en Amelia como <strong>{resolvedName}</strong>
+          {upcomingMeets.length > 0 && (
+            <div style={{ padding: 12, background: "linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(16,185,129,0.04) 100%)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "#065f46", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>
+                📹 {upcomingMeets.length === 1 ? "Cita reservada con Google Meet" : `${upcomingMeets.length} citas próximas con Meet`}
+              </div>
+              {upcomingMeets.slice(0, 5).map((a) => {
+                const d = new Date(a.booking_start);
+                const dayLbl = d.toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short", timeZone: "Europe/Madrid" });
+                const hourLbl = d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Europe/Madrid" });
+                const meetMsg = `Te confirmo nuestra cita ${dayLbl} a las ${hourLbl}${a.provider_name ? ` con ${a.provider_name}` : ""}.\n\nÉste es el enlace de Google Meet para conectarnos:\n${a.google_meet_url}\n\nNos vemos pronto 💜`;
+                return (
+                  <div key={a.id} style={{ padding: 8, background: "#fff", borderRadius: 8, marginBottom: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1a2e" }}>{dayLbl} · {hourLbl}</div>
+                      <div style={{ fontSize: 11, color: "#666" }}>{a.provider_name}{a.service_name ? ` · ${a.service_name}` : ""}</div>
+                      <a href={a.google_meet_url!} target="_blank" rel="noreferrer" style={{ fontSize: 10.5, color: "#065f46", fontWeight: 600, textDecoration: "none", wordBreak: "break-all" }}>{a.google_meet_url}</a>
+                    </div>
+                    <button
+                      onClick={() => { onInsertText(meetMsg); onClose(); }}
+                      style={{ padding: "5px 10px", fontSize: 10.5, fontWeight: 800, borderRadius: 6, border: "none", background: "linear-gradient(135deg, #16a34a 0%, #22c55e 100%)", color: "#fff", cursor: "pointer", letterSpacing: 0.3 }}
+                    >📨 Enviar Meet al chat</button>
+                  </div>
+                );
+              })}
             </div>
           )}
           {err && <div style={{ padding: 10, background: "#fef2f2", color: "#991b1b", borderRadius: 8, fontSize: 12, marginBottom: 12 }}>⚠️ {err}</div>}
@@ -138,7 +171,7 @@ export default function ProposeAppointmentModal({
               })}
             </>
           )}
-          {!loading && !err && slots.length === 0 && psychologistId && (
+          {!loading && !err && slots.length === 0 && providerAmeliaId && (
             <div style={{ color: "#888", fontSize: 12 }}>Sin huecos disponibles los próximos días (todos ocupados o sin agenda).</div>
           )}
 
