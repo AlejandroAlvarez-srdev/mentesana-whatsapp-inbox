@@ -44,6 +44,9 @@ export default function ConversationList({
   const [numberFilter, setNumberFilter] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [waNumbers, setWaNumbers] = useState<{ phone_number_id: string; name: string; phone_number: string | null }[]>([]);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkSaving, setBulkSaving] = useState(false);
   const debounceRef = useRef<number | null>(null);
   const reqIdRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -279,6 +282,45 @@ export default function ConversationList({
       {err && (
         <div style={{ padding: 10, fontSize: 12, color: "#900", background: "#fee", borderBottom: "1px solid #fcc" }}>{err}</div>
       )}
+      {/* Bulk mode toggle */}
+      <div style={{ padding: "6px 12px", borderBottom: "1px solid rgba(0,0,0,0.04)", display: "flex", alignItems: "center", justifyContent: "space-between", background: bulkMode ? "rgba(106,23,140,0.06)" : "transparent" }}>
+        <button
+          onClick={() => { setBulkMode((b) => !b); if (bulkMode) setSelected(new Set()); }}
+          style={{ background: "transparent", border: "none", color: bulkMode ? PURPLE : "#888", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+        >
+          {bulkMode ? `✓ ${selected.size} seleccionada${selected.size === 1 ? "" : "s"} · cancelar` : "☑️ Modo selección"}
+        </button>
+        {bulkMode && (
+          <button
+            onClick={() => setSelected(new Set(items.map((i) => i.id)))}
+            style={{ background: "transparent", border: "none", color: PURPLE, fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+          >Todas ({items.length})</button>
+        )}
+      </div>
+      {bulkMode && selected.size > 0 && (
+        <BulkActionsBar
+          selectedIds={Array.from(selected)}
+          saving={bulkSaving}
+          onApply={async (action, payload) => {
+            setBulkSaving(true);
+            try {
+              const r = await fetch("/api/agent/bulk-actions", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ conversation_ids: Array.from(selected), action, payload }),
+              });
+              if (!r.ok) alert(`Error: ${r.status} ${await r.text()}`);
+              else {
+                setSelected(new Set());
+                setBulkMode(false);
+                // refetch — naive: recargar la página al estilo del componente
+                window.location.reload();
+              }
+            } finally { setBulkSaving(false); }
+          }}
+        />
+      )}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto" }}>
         {items.length === 0 && !loading && (
           <div style={{ padding: 24, textAlign: "center", color: "#aaa", fontSize: 12 }}>Sin resultados</div>
@@ -289,7 +331,31 @@ export default function ConversationList({
           </div>
         )}
         {items.map((c) => (
-          <ConvRow key={c.id} c={c} selected={c.id === selectedId} onClick={() => onSelect(c)} />
+          <ConvRow
+            key={c.id}
+            c={c}
+            selected={c.id === selectedId}
+            bulkMode={bulkMode}
+            checked={selected.has(c.id)}
+            onToggleCheck={() => {
+              setSelected((s) => {
+                const next = new Set(s);
+                if (next.has(c.id)) next.delete(c.id); else next.add(c.id);
+                return next;
+              });
+            }}
+            onClick={() => {
+              if (bulkMode) {
+                setSelected((s) => {
+                  const next = new Set(s);
+                  if (next.has(c.id)) next.delete(c.id); else next.add(c.id);
+                  return next;
+                });
+              } else {
+                onSelect(c);
+              }
+            }}
+          />
         ))}
         {items.length > 0 && items.length < total && mode === "list" && (
           <div ref={sentinelRef} style={{ padding: "12px 14px", textAlign: "center", color: "#aaa", fontSize: 11 }}>
@@ -338,7 +404,7 @@ function PipelinePill({
   );
 }
 
-function ConvRow({ c, selected, onClick }: { c: ConvSummary; selected: boolean; onClick: () => void }) {
+function ConvRow({ c, selected, onClick, bulkMode = false, checked = false, onToggleCheck }: { c: ConvSummary; selected: boolean; onClick: () => void; bulkMode?: boolean; checked?: boolean; onToggleCheck?: () => void }) {
   const isPaid = c.purchase_status === "pagado" || c.paid_at != null || c.status === "pagado";
   const hasUnread = (c.unread_count ?? 0) > 0;
   const initials = getInitials(c.lead_name || c.phone || "?");
@@ -351,8 +417,8 @@ function ConvRow({ c, selected, onClick }: { c: ConvSummary; selected: boolean; 
         width: "100%",
         textAlign: "left",
         padding: "12px 14px",
-        background: selected ? "rgba(106,23,140,0.07)" : "transparent",
-        borderLeft: selected ? `3px solid ${PURPLE}` : "3px solid transparent",
+        background: checked ? "rgba(106,23,140,0.12)" : selected ? "rgba(106,23,140,0.07)" : "transparent",
+        borderLeft: checked || selected ? `3px solid ${PURPLE}` : "3px solid transparent",
         border: "none",
         borderBottom: "1px solid rgba(0,0,0,0.04)",
         cursor: "pointer",
@@ -362,6 +428,15 @@ function ConvRow({ c, selected, onClick }: { c: ConvSummary; selected: boolean; 
         transition: "background 0.12s",
       }}
     >
+      {bulkMode && (
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => { e.stopPropagation(); onToggleCheck?.(); }}
+          onClick={(e) => e.stopPropagation()}
+          style={{ marginTop: 12, width: 16, height: 16, accentColor: PURPLE, cursor: "pointer", flexShrink: 0 }}
+        />
+      )}
       <div
         style={{
           width: 38,
@@ -477,4 +552,62 @@ function fmtRel(iso: string): string {
     return `${dow} ${hhmm}`;
   }
   return d.toLocaleDateString("es-ES", { timeZone: tz, day: "2-digit", month: "short" }) + ` ${hhmm}`;
+}
+
+function BulkActionsBar({ selectedIds, saving, onApply }: { selectedIds: string[]; saving: boolean; onApply: (action: string, payload: any) => Promise<void> }) {
+  const [action, setAction] = useState("");
+  const [stage, setStage] = useState("seguimiento_1");
+  const [clientType, setClientType] = useState("ventas");
+
+  return (
+    <div style={{ padding: 10, background: "rgba(106,23,140,0.04)", borderBottom: "1px solid rgba(106,23,140,0.15)", display: "grid", gap: 6 }}>
+      <select value={action} onChange={(e) => setAction(e.target.value)} style={{ padding: "6px 8px", fontSize: 12, border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6 }}>
+        <option value="">— Acción a aplicar a {selectedIds.length} —</option>
+        <option value="set_status">📊 Mover a etapa</option>
+        <option value="set_client_type">🔄 Cambiar tipo (ventas/soporte)</option>
+        <option value="mark_unread_zero">✓ Marcar como leídas</option>
+        <option value="close_perdido">❌ Marcar perdidas</option>
+      </select>
+      {action === "set_status" && (
+        <select value={stage} onChange={(e) => setStage(e.target.value)} style={{ padding: "6px 8px", fontSize: 12, border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6 }}>
+          <option value="sin_contactar">📭 Sin contactar</option>
+          <option value="seguimiento_1">1️⃣ Seguimiento 1</option>
+          <option value="seguimiento_2">2️⃣ Seguimiento 2</option>
+          <option value="seguimiento_3">3️⃣ Seguimiento 3</option>
+          <option value="seguimiento_4">4️⃣ Seguimiento 4</option>
+          <option value="pagado">💰 Pagaron</option>
+          <option value="perdido">❌ Perdido</option>
+        </select>
+      )}
+      {action === "set_client_type" && (
+        <select value={clientType} onChange={(e) => setClientType(e.target.value)} style={{ padding: "6px 8px", fontSize: 12, border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6 }}>
+          <option value="ventas">💼 Ventas</option>
+          <option value="soporte">🛟 Soporte</option>
+        </select>
+      )}
+      <button
+        onClick={() => {
+          if (!action) return;
+          if (!confirm(`Aplicar a ${selectedIds.length} conversaciones?`)) return;
+          const payload: any = {};
+          if (action === "set_status") payload.status = stage;
+          if (action === "set_client_type") payload.client_type = clientType;
+          void onApply(action, payload);
+        }}
+        disabled={!action || saving}
+        style={{
+          padding: "7px 10px",
+          fontSize: 12,
+          fontWeight: 800,
+          borderRadius: 6,
+          border: "none",
+          cursor: !action || saving ? "default" : "pointer",
+          background: !action || saving ? "rgba(0,0,0,0.08)" : PURPLE,
+          color: !action || saving ? "#888" : "#fff",
+        }}
+      >
+        {saving ? "Aplicando…" : `Aplicar a ${selectedIds.length}`}
+      </button>
+    </div>
+  );
 }

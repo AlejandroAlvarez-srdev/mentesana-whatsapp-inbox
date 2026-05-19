@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import TemplatesModal from "./TemplatesModal";
+import ProposeAppointmentModal from "./ProposeAppointmentModal";
 import WindowBadge, { WindowInfo, fmtMinutesLeft, colorFor } from "./WindowBadge";
 import { useMessagesRealtime } from "../_hooks/useInboxRealtime";
 
@@ -68,6 +69,7 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [savingSale, setSavingSale] = useState(false);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [proposeOpen, setProposeOpen] = useState(false);
 
   const loadFull = useCallback(async () => {
     if (!conversationId) return;
@@ -512,6 +514,7 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
       <Composer
         onSend={send}
         onOpenTemplates={() => setTplOpen(true)}
+        onOpenPropose={() => setProposeOpen(true)}
         quickReplies={quickReplies}
         onSendMedia={async (file, caption) => {
           if (!conversationId) return;
@@ -553,11 +556,24 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
         />
       )}
 
+      {proposeOpen && (
+        <ProposeAppointmentModal
+          psychologistAmeliaId={(conv as any).assigned_psychologist_amelia_id ?? null}
+          psychologistName={conv.assigned_psychologist_name}
+          leadName={conv.lead_name}
+          onClose={() => setProposeOpen(false)}
+          onInsertText={(text) => {
+            // Inserta el texto en el composer disparando un CustomEvent (el Composer lo escucha)
+            window.dispatchEvent(new CustomEvent("inbox:insert-composer", { detail: { text } }));
+          }}
+        />
+      )}
+
     </div>
   );
 }
 
-function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia }: { onSend: (text: string) => Promise<void>; onOpenTemplates: () => void; quickReplies: QuickReply[]; onSendMedia: (file: File, caption: string | null) => Promise<void> }) {
+function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia, onOpenPropose }: { onSend: (text: string) => Promise<void>; onOpenTemplates: () => void; quickReplies: QuickReply[]; onSendMedia: (file: File, caption: string | null) => Promise<void>; onOpenPropose?: () => void }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
@@ -571,6 +587,19 @@ function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia }: { onSe
   async function handleAttach(file: File) {
     setPendingFile(file);
   }
+
+  // Listener para insertar texto desde el modal ProposeAppointmentModal
+  useEffect(() => {
+    const onInsert = (e: Event) => {
+      const ev = e as CustomEvent<{ text: string }>;
+      if (ev.detail?.text) {
+        setText((cur) => (cur ? `${cur}\n\n${ev.detail.text}` : ev.detail.text));
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener("inbox:insert-composer", onInsert as EventListener);
+    return () => window.removeEventListener("inbox:insert-composer", onInsert as EventListener);
+  }, []);
   async function sendPendingMedia() {
     if (!pendingFile || uploadingMedia) return;
     setUploadingMedia(true);
@@ -682,6 +711,15 @@ function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia }: { onSe
         >
           📋 Plantillas
         </button>
+        {onOpenPropose && (
+          <button
+            onClick={onOpenPropose}
+            title="Proponer huecos disponibles de la psicóloga"
+            style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${PURPLE}55`, background: `${PURPLE}0d`, color: PURPLE, cursor: "pointer", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}
+          >
+            📅 Proponer cita
+          </button>
+        )}
         <textarea
           ref={inputRef}
           value={text}
