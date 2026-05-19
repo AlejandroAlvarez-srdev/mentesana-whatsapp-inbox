@@ -5,6 +5,7 @@ import { ConvSummary } from "./ConversationList";
 import PipelinePanel from "@/app/agent/_components/PipelinePanel";
 import EmailSuggestModal from "./EmailSuggestModal";
 import AmeliaToolsTab from "./AmeliaToolsTab";
+import LeadScoreBadge from "./LeadScoreBadge";
 
 const PURPLE = "#6A178C";
 
@@ -216,6 +217,7 @@ export default function InsightsPanel({
       <div style={{ overflowY: "auto", flex: 1, padding: 14 }}>
         {tab === "pipeline" && (
           <>
+            {conversationId && <div style={{ marginBottom: 12 }}><LeadScoreBadge conversationId={conversationId} /></div>}
             {(profile?.conversation?.phone || selectedSummary?.phone) ? (
               <PipelinePanel
                 phone={(profile?.conversation?.phone ?? selectedSummary?.phone)!}
