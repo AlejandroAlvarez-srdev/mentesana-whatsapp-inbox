@@ -558,12 +558,11 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
 
       {proposeOpen && (
         <ProposeAppointmentModal
-          psychologistAmeliaId={(conv as any).assigned_psychologist_amelia_id ?? null}
+          psychologistId={(conv as any).assigned_psychologist ?? null}
           psychologistName={conv.assigned_psychologist_name}
           leadName={conv.lead_name}
           onClose={() => setProposeOpen(false)}
           onInsertText={(text) => {
-            // Inserta el texto en el composer disparando un CustomEvent (el Composer lo escucha)
             window.dispatchEvent(new CustomEvent("inbox:insert-composer", { detail: { text } }));
           }}
         />

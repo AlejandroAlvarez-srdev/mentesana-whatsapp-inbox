@@ -7,13 +7,13 @@ const PURPLE = "#6A178C";
 type Slot = { day: string; weekday: string; hour: number; iso: string };
 
 export default function ProposeAppointmentModal({
-  psychologistAmeliaId,
+  psychologistId,
   psychologistName,
   leadName,
   onClose,
   onInsertText,
 }: {
-  psychologistAmeliaId: number | null;
+  psychologistId: string | null;
   psychologistName: string | null;
   leadName: string | null;
   onClose: () => void;
@@ -23,17 +23,22 @@ export default function ProposeAppointmentModal({
   const [loading, setLoading] = useState(true);
   const [picked, setPicked] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [resolvedName, setResolvedName] = useState<string | null>(null);
   const [bookingUrl, setBookingUrl] = useState("https://mentesanapsicologia.com/reservar");
 
   useEffect(() => {
-    if (!psychologistAmeliaId) { setLoading(false); return; }
+    if (!psychologistId) { setLoading(false); return; }
     setLoading(true);
-    fetch(`/api/agent/amelia/free-slots?provider_id=${psychologistAmeliaId}`, { credentials: "include" })
+    fetch(`/api/agent/amelia/free-slots?psychologist_id=${encodeURIComponent(psychologistId)}`, { credentials: "include" })
       .then((r) => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
-      .then((d) => setSlots(d.slots ?? []))
+      .then((d) => {
+        setSlots(d.slots ?? []);
+        if (d.resolved?.name) setResolvedName(d.resolved.name);
+        if (d.error === "no_amelia_provider_match") setErr("No se encontró match Amelia para esta psicóloga (busqué por email y nombre).");
+      })
       .catch((e) => setErr(String(e)))
       .finally(() => setLoading(false));
-  }, [psychologistAmeliaId]);
+  }, [psychologistId]);
 
   function toggle(iso: string) {
     setPicked((p) => p.includes(iso) ? p.filter((x) => x !== iso) : [...p, iso].slice(0, 3));
@@ -79,9 +84,14 @@ export default function ProposeAppointmentModal({
         </header>
 
         <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
-          {!psychologistAmeliaId && (
+          {!psychologistId && (
             <div style={{ padding: 16, background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, fontSize: 12, color: "#92400e", marginBottom: 12 }}>
-              ⚠️ La conversación no tiene psicóloga asignada con ID Amelia. Asigna una primero o usa el link genérico.
+              ⚠️ La conversación no tiene psicóloga asignada. Asígnale una en el header del chat.
+            </div>
+          )}
+          {resolvedName && resolvedName !== psychologistName && (
+            <div style={{ padding: 10, background: "rgba(106,23,140,0.04)", border: `1px solid ${PURPLE}33`, borderRadius: 8, fontSize: 11.5, color: PURPLE, marginBottom: 10 }}>
+              ✓ Matcheado en Amelia como <strong>{resolvedName}</strong>
             </div>
           )}
           {err && <div style={{ padding: 10, background: "#fef2f2", color: "#991b1b", borderRadius: 8, fontSize: 12, marginBottom: 12 }}>⚠️ {err}</div>}
@@ -128,7 +138,7 @@ export default function ProposeAppointmentModal({
               })}
             </>
           )}
-          {!loading && !err && slots.length === 0 && psychologistAmeliaId && (
+          {!loading && !err && slots.length === 0 && psychologistId && (
             <div style={{ color: "#888", fontSize: 12 }}>Sin huecos disponibles los próximos días (todos ocupados o sin agenda).</div>
           )}
 
