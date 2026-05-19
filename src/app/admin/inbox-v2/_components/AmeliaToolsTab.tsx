@@ -100,8 +100,11 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
                     body: JSON.stringify({ action: "cancel", appointment_id: a.appointment_id, booking_id: a.booking_id, conversation_id: conversationId }),
                   });
                   const d = await r.json();
-                  if (r.ok) { alert("✅ Cita cancelada"); void load(); }
-                  else alert("❌ " + (d.error ?? "Error cancelando"));
+                  if (r.ok) {
+                    const w = d.result?.meet_warnings?.[0];
+                    alert(`✅ Cita cancelada${w ? `\n⚠️ Google Calendar: ${w.slice(0,100)}` : ""}`);
+                    void load();
+                  } else alert("❌ " + (d.friendly ?? d.error ?? "Error cancelando"));
                 }}
               />
             ))}
@@ -264,8 +267,15 @@ function ScheduleModal({ customerId, customerName, service, conversationId, onCl
         }),
       });
       const d = await r.json();
-      if (r.ok) { alert(`✅ Cita agendada para ${customerName} (descontada del bono)`); onScheduled(); }
-      else alert("❌ " + (d.error ?? "Error agendando"));
+      if (r.ok) {
+        const meetMsg = d.result?.google_meet_url
+          ? `\n📹 Meet: ${d.result.google_meet_url}`
+          : d.result?.meet_warnings?.length
+            ? `\n⚠️ Cita creada SIN Meet (${d.result.meet_warnings[0].slice(0,100)})`
+            : "";
+        alert(`✅ Cita agendada para ${customerName} (descontada del bono)${meetMsg}`);
+        onScheduled();
+      } else alert("❌ " + (d.friendly ?? d.error ?? "Error agendando"));
     } finally { setSaving(false); }
   }
 
@@ -337,8 +347,11 @@ function RescheduleModal({ appt, conversationId, onClose, onRescheduled }: { app
         body: JSON.stringify({ action: "reschedule", appointment_id: appt.appointment_id, booking_id: appt.booking_id, new_start_utc: picked, conversation_id: conversationId }),
       });
       const d = await r.json();
-      if (r.ok) { alert("✅ Cita reagendada"); onRescheduled(); }
-      else alert("❌ " + (d.error ?? "Error reagendando"));
+      if (r.ok) {
+        const w = d.result?.meet_warnings?.[0];
+        alert(`✅ Cita reagendada${w ? `\n⚠️ Google Calendar: ${w.slice(0,100)}` : ""}`);
+        onRescheduled();
+      } else alert("❌ " + (d.friendly ?? d.error ?? "Error reagendando"));
     } finally { setSaving(false); }
   }
 
