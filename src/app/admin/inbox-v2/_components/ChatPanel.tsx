@@ -18,6 +18,7 @@ type Message = {
   template_name: string | null;
   timestamp: string;
   status: string | null;
+  error_reason: string | null;
   media_url: string | null;
   media_type: string | null;
   media_caption: string | null;
@@ -330,11 +331,14 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
       body: JSON.stringify({ text, agent_name: "agente" }),
     });
     if (r.ok) {
-      // refetch para que aparezca el mensaje real
+      // El mensaje aparece via realtime; loadFull tras 1.5s pesca el status='failed' si Meta lo rechazo despues
+      setErr(null);
       await loadFull();
+      setTimeout(() => { void loadFull(); }, 1500);
+      setTimeout(() => { void loadFull(); }, 4500);
     } else {
       const t = await r.text();
-      setErr(t.slice(0, 200));
+      setErr(t.slice(0, 400));
     }
   }
 
@@ -598,7 +602,26 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
           await loadFull();
         }}
       />
-      {err && <div style={{ padding: "6px 14px", fontSize: 11, color: "#900", background: "#fee" }}>{err}</div>}
+      {err && (() => {
+        const exp = explainFailure(err);
+        return (
+          <div style={{ padding: "10px 14px", background: "#fef2f2", borderTop: "1px solid #fecaca" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+              <span style={{ fontSize: 16 }}>⚠️</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#991b1b", marginBottom: 2 }}>{exp.title}</div>
+                <div style={{ fontSize: 11.5, color: "#991b1b", lineHeight: 1.4 }}>{exp.message}</div>
+                {exp.suggestion && <div style={{ fontSize: 11, color: "#7f1d1d", marginTop: 4, fontStyle: "italic" }}>💡 {exp.suggestion}</div>}
+                <details style={{ marginTop: 4 }}>
+                  <summary style={{ fontSize: 10.5, color: "#991b1b", cursor: "pointer", fontWeight: 700 }}>Ver detalle técnico</summary>
+                  <code style={{ display: "block", marginTop: 4, fontSize: 10.5, fontFamily: "ui-monospace, monospace", color: "#7f1d1d", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{err}</code>
+                </details>
+              </div>
+              <button onClick={() => setErr(null)} style={{ background: "transparent", border: "none", color: "#991b1b", fontSize: 16, cursor: "pointer", padding: 0 }} title="Cerrar">×</button>
+            </div>
+          </div>
+        );
+      })()}
 
       <TemplatesModal
         open={tplOpen}
@@ -832,10 +855,13 @@ function resolveMediaUrl(rawUrl: string | null, apiBase: string): string | null 
 
 function Bubble({ m, apiBase }: { m: Message; apiBase: string }) {
   const isLead = m.is_lead;
+  const isFailed = m.status === "failed" || m.status === "error";
   const align = isLead ? "flex-start" : "flex-end";
-  const bg = isLead ? "#fff" : m.is_psychologist ? "rgba(106,23,140,0.12)" : "linear-gradient(135deg, #6A178C 0%, #8b2dad 100%)";
-  const border = isLead ? "1px solid rgba(0,0,0,0.06)" : "none";
-  const textColor = !isLead && !m.is_psychologist ? "#fff" : "#1a1a2e";
+  const bg = isFailed
+    ? "rgba(254,242,242,1)"
+    : isLead ? "#fff" : m.is_psychologist ? "rgba(106,23,140,0.12)" : "linear-gradient(135deg, #6A178C 0%, #8b2dad 100%)";
+  const border = isFailed ? "1px solid #fecaca" : isLead ? "1px solid rgba(0,0,0,0.06)" : "none";
+  const textColor = isFailed ? "#991b1b" : !isLead && !m.is_psychologist ? "#fff" : "#1a1a2e";
   const radius = isLead ? "14px 14px 14px 4px" : "14px 14px 4px 14px";
   const mediaSrc = resolveMediaUrl(m.media_url, apiBase);
 
@@ -888,13 +914,67 @@ function Bubble({ m, apiBase }: { m: Message; apiBase: string }) {
           if (!content && !mediaSrc) return <div style={{ fontSize: 13.5, color: textColor, opacity: 0.5 }}>—</div>;
           return content ? <div style={{ fontSize: 13.5, lineHeight: 1.45, color: textColor, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{content}</div> : null;
         })()}
-        <div style={{ fontSize: 9.5, color: isLead || m.is_psychologist ? "#aaa" : "rgba(255,255,255,0.7)", marginTop: 4, textAlign: "right", fontWeight: 500 }}>
+        {isFailed && m.error_reason && (
+          <div style={{ marginTop: 6, padding: "7px 9px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: 6 }}>
+            <div style={{ fontSize: 9.5, fontWeight: 800, color: "#991b1b", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>
+              ⚠️ {explainFailure(m.error_reason).title}
+            </div>
+            <div style={{ fontSize: 11, color: "#991b1b", lineHeight: 1.4 }}>
+              {explainFailure(m.error_reason).message}
+            </div>
+            {explainFailure(m.error_reason).suggestion && (
+              <div style={{ marginTop: 4, fontSize: 10.5, color: "#7f1d1d", fontStyle: "italic" }}>
+                💡 {explainFailure(m.error_reason).suggestion}
+              </div>
+            )}
+            <details style={{ marginTop: 5 }}>
+              <summary style={{ fontSize: 9.5, color: "#991b1b", cursor: "pointer", fontWeight: 700 }}>Detalle técnico</summary>
+              <code style={{ display: "block", marginTop: 4, fontSize: 10, fontFamily: "ui-monospace, monospace", color: "#7f1d1d", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                {m.error_reason}
+              </code>
+            </details>
+          </div>
+        )}
+        <div style={{ fontSize: 9.5, color: isFailed ? "#991b1b" : isLead || m.is_psychologist ? "#aaa" : "rgba(255,255,255,0.7)", marginTop: 4, textAlign: "right", fontWeight: 500 }}>
           {fmtTime(m.timestamp)}
-          {m.status && <span> · {m.status}</span>}
+          {m.status && <span style={{ fontWeight: isFailed ? 800 : 500 }}> · {isFailed ? "❌ FALLÓ" : m.status}</span>}
         </div>
       </div>
     </div>
   );
+}
+
+// Traduce el error técnico de WhatsApp / Meta a algo accionable
+function explainFailure(raw: string): { title: string; message: string; suggestion: string | null } {
+  const r = raw.toLowerCase();
+  if (r.includes("24") && (r.includes("window") || r.includes("ventana") || r.includes("session"))) {
+    return { title: "Ventana 24h cerrada", message: "El cliente no ha respondido en las últimas 24h, así que WhatsApp no permite enviarle texto libre.", suggestion: "Envíale una plantilla aprobada (botón 📋 Plantillas) para reabrir la conversación." };
+  }
+  if (r.includes("131047") || r.includes("re-engagement")) {
+    return { title: "Re-engagement requerido", message: "Meta rechazó el mensaje porque la conversación está fuera de la ventana de 24h.", suggestion: "Usa una plantilla de Meta aprobada en lugar de texto libre." };
+  }
+  if (r.includes("131026") || r.includes("not in allowed list") || r.includes("invalid phone")) {
+    return { title: "Número no válido en WhatsApp", message: "Este número no tiene cuenta de WhatsApp o no acepta mensajes de empresa.", suggestion: "Verifica el número o usa SMS/Email como alternativa." };
+  }
+  if (r.includes("rate") && r.includes("limit")) {
+    return { title: "Rate limit", message: "Demasiados envíos seguidos a este número.", suggestion: "Espera unos minutos y reintenta." };
+  }
+  if (r.includes("template") && (r.includes("not approved") || r.includes("rejected") || r.includes("paused"))) {
+    return { title: "Plantilla no aprobada", message: "Meta rechazó o pausó esta plantilla.", suggestion: "Elige otra plantilla activa." };
+  }
+  if (r.includes("token") && (r.includes("expired") || r.includes("invalid"))) {
+    return { title: "Token Meta caducado", message: "El access token de WhatsApp Business expiró o fue revocado.", suggestion: "Avisa a admin: hay que renovar el token en Meta Business Manager." };
+  }
+  if (r.includes("number not assigned") || r.includes("phone_number_id")) {
+    return { title: "Número WhatsApp no asignado", message: "Esta conversación no tiene un número de WhatsApp asignado para enviar.", suggestion: "Asigna un número en el banner amarillo del header." };
+  }
+  if (r.includes("media") && (r.includes("invalid") || r.includes("too large") || r.includes("unsupported"))) {
+    return { title: "Media inválido", message: "El archivo no es compatible o es demasiado grande para WhatsApp.", suggestion: "Reduce el tamaño o convierte a un formato soportado (jpg/png/mp4/pdf)." };
+  }
+  if (r.includes("network") || r.includes("timeout") || r.includes("fetch failed")) {
+    return { title: "Error de red", message: "No se pudo contactar con la API de Meta.", suggestion: "Reintenta en un minuto." };
+  }
+  return { title: "Envío falló", message: "Meta devolvió un error al enviar este mensaje.", suggestion: null };
 }
 
 function PaymentLinkModal({
