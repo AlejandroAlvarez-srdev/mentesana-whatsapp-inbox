@@ -20,6 +20,7 @@ type Message = {
   media_url: string | null;
   media_type: string | null;
   media_caption: string | null;
+  transcription: string | null;
   is_lead: boolean;
   is_agent: boolean;
   is_psychologist: boolean;
@@ -756,7 +757,19 @@ function Bubble({ m, apiBase }: { m: Message; apiBase: string }) {
         )}
         {mediaSrc && (m.media_type === "image" || m.media_type === "sticker") && <img src={mediaSrc} alt="media" style={{ marginBottom: 6, maxWidth: 280, borderRadius: 6, display: "block" }} />}
         {mediaSrc && m.media_type === "video" && <video src={mediaSrc} controls style={{ marginBottom: 6, maxWidth: 280, borderRadius: 6, display: "block" }} />}
-        {mediaSrc && m.media_type === "audio" && <audio src={mediaSrc} controls style={{ marginBottom: 6, maxWidth: 280, display: "block" }} />}
+        {mediaSrc && m.media_type === "audio" && (
+          <>
+            <audio src={mediaSrc} controls style={{ marginBottom: 6, maxWidth: 280, display: "block" }} />
+            {m.transcription ? (
+              <div style={{ marginBottom: 6, padding: "8px 10px", background: "rgba(106,23,140,0.06)", borderLeft: "3px solid #6A178C", borderRadius: 4, fontSize: 12, lineHeight: 1.5, color: "#1a1a2e", fontStyle: "italic" }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#6A178C", textTransform: "uppercase", letterSpacing: 0.4, display: "block", marginBottom: 3 }}>📝 Transcripción</span>
+                {m.transcription}
+              </div>
+            ) : (
+              <div style={{ marginBottom: 6, fontSize: 10.5, color: "#888", fontStyle: "italic" }}>⏳ Transcribiendo audio…</div>
+            )}
+          </>
+        )}
         {mediaSrc && m.media_type === "document" && (
           <a href={mediaSrc} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", marginBottom: 6, background: "rgba(0,0,0,0.04)", borderRadius: 6, textDecoration: "none", color: "#1a1a2e" }}>
             <span style={{ fontSize: 20 }}>📄</span>
