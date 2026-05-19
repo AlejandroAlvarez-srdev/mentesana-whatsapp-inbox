@@ -98,6 +98,26 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
     void loadFull();
   }, [conversationId, loadFull]);
 
+  // Listener para que ProfileTab (en InsightsPanel) pueda disparar acciones del header
+  useEffect(() => {
+    if (!conversationId) return;
+    const onOpenPayment = (e: Event) => {
+      const ev = e as CustomEvent<{ conversationId: string }>;
+      if (ev.detail?.conversationId === conversationId) setPaymentModalOpen(true);
+    };
+    const onMarkSold = (e: Event) => {
+      const ev = e as CustomEvent<{ conversationId: string }>;
+      if (ev.detail?.conversationId === conversationId) void markAsSold();
+    };
+    window.addEventListener("inbox:open-payment", onOpenPayment as EventListener);
+    window.addEventListener("inbox:mark-sold", onMarkSold as EventListener);
+    return () => {
+      window.removeEventListener("inbox:open-payment", onOpenPayment as EventListener);
+      window.removeEventListener("inbox:mark-sold", onMarkSold as EventListener);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+
   // Load auxiliaries once
   useEffect(() => {
     Promise.all([
@@ -327,177 +347,104 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
 
   return (
     <div style={{ background: "#fff", borderRadius: 14, border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 1px 3px rgba(0,0,0,0.02)", display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", width: "100%" }}>
-      {/* Header */}
-      <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(0,0,0,0.06)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-            <EditableField
-              value={conv.lead_name ?? ""}
-              placeholder="(sin nombre)"
-              fontSize={15}
-              weight={700}
-              color="#1a1a2e"
-              onSave={(v) => patchConv({ lead_name: v.trim() || null } as any)}
-            />
-            <span style={{ fontSize: 12, color: "#888" }}>{conv.phone}</span>
-            <EditableField
-              value={(conv as any).email ?? ""}
-              placeholder="+ email"
-              fontSize={11.5}
-              weight={500}
-              color="#666"
-              prefix="✉️"
-              onSave={(v) => patchConv({ email: v.trim() || null } as any)}
-            />
-            {(conv.purchase_status === "pagado" || conv.paid_at || conv.status === "pagado") && (
-              <Tag label={`PAGÓ ${conv.purchase_amount ?? ""}€`} color={PURPLE} solid />
-            )}
+      {/* Header compacto — solo cliente / psicólogo / agente. Resto (nombre, email, status, cobrar, vendida) viven en el tab Perfil del panel derecho */}
+      <div style={{ padding: "10px 14px", borderBottom: "1px solid rgba(0,0,0,0.06)", display: "flex", alignItems: "center", gap: 10, flexWrap: "nowrap", overflowX: "auto" }}>
+        {/* Tipo cliente · toggle ventas / soporte */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 3, flexShrink: 0 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.4 }}>Tipo</span>
+          <div style={{ display: "flex", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, overflow: "hidden" }} title="Tipo de conversación">
+            <button
+              type="button"
+              onClick={() => patchConv({ client_type: "ventas" } as any)}
+              style={{
+                padding: "5px 9px",
+                fontSize: 11,
+                fontWeight: 700,
+                border: "none",
+                cursor: "pointer",
+                background: (conv as any).client_type === "ventas" ? PURPLE : "#fff",
+                color: (conv as any).client_type === "ventas" ? "#fff" : "#475569",
+              }}
+            >💼 Ventas</button>
+            <button
+              type="button"
+              onClick={() => patchConv({ client_type: "soporte" } as any)}
+              style={{
+                padding: "5px 9px",
+                fontSize: 11,
+                fontWeight: 700,
+                border: "none",
+                borderLeft: "1px solid rgba(0,0,0,0.08)",
+                cursor: "pointer",
+                background: (conv as any).client_type === "soporte" ? "#0891b2" : "#fff",
+                color: (conv as any).client_type === "soporte" ? "#fff" : "#475569",
+              }}
+            >🛟 Soporte</button>
           </div>
-          {conv.assigned_psychologist_name && (
-            <span style={{ fontSize: 11, color: PURPLE, fontWeight: 600 }}>👩‍⚕️ {conv.assigned_psychologist_name}</span>
-          )}
         </div>
 
-        {/* Status */}
-        <select
-          value={conv.status ?? ""}
-          onChange={(e) => patchConv({ status: e.target.value })}
-          style={selectStyle}
-          title="Estado"
-        >
-          <option value="">— estado —</option>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-
-        {/* Assigned agent */}
-        <select
-          value={conv.assigned_to ?? ""}
-          onChange={(e) => patchConv({ assigned_to: e.target.value || null })}
-          style={selectStyle}
-          title="Asignado a agente"
-        >
-          <option value="">— agente —</option>
-          {agents.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name?.trim()} {a.agent_type ? `· ${a.agent_type}` : ""}
-            </option>
-          ))}
-        </select>
-
-        {/* Assigned psychologist */}
-        <select
-          value={(conv as any).assigned_psychologist ?? ""}
-          onChange={(e) => {
-            const psyId = e.target.value || null;
-            const psy = psychologists.find((p) => p.id === psyId);
-            patchConv({ assigned_psychologist: psyId, assigned_psychologist_name: psy?.name ?? null } as any);
-          }}
-          style={selectStyle}
-          title="Psicóloga asignada"
-        >
-          <option value="">— psicóloga —</option>
-          {psychologists.map((p) => {
-            const full = p.current_patients != null && p.max_patients != null && p.current_patients >= p.max_patients;
-            return (
-              <option key={p.id} value={p.id} disabled={!p.is_accepting_patients}>
-                {p.name?.trim()}{p.specialty ? ` · ${p.specialty}` : ""}{p.current_patients != null && p.max_patients != null ? ` (${p.current_patients}/${p.max_patients})` : ""}{full ? " ⚠️" : ""}
-              </option>
-            );
-          })}
-        </select>
-
-        {/* Toggle ventas / soporte */}
-        <div style={{ display: "flex", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6, overflow: "hidden" }} title="Cambia el tipo de conversación">
-          <button
-            type="button"
-            onClick={() => patchConv({ client_type: "ventas" } as any)}
-            style={{
-              padding: "5px 10px",
-              fontSize: 11,
-              fontWeight: 700,
-              border: "none",
-              cursor: "pointer",
-              background: (conv as any).client_type === "ventas" ? PURPLE : "#fff",
-              color: (conv as any).client_type === "ventas" ? "#fff" : "#475569",
+        {/* Psicóloga */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: "1 1 200px", minWidth: 160 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.4 }}>Psicóloga</span>
+          <select
+            value={(conv as any).assigned_psychologist ?? ""}
+            onChange={(e) => {
+              const psyId = e.target.value || null;
+              const psy = psychologists.find((p) => p.id === psyId);
+              patchConv({ assigned_psychologist: psyId, assigned_psychologist_name: psy?.name ?? null } as any);
             }}
-          >💼 Ventas</button>
-          <button
-            type="button"
-            onClick={() => patchConv({ client_type: "soporte" } as any)}
-            style={{
-              padding: "5px 10px",
-              fontSize: 11,
-              fontWeight: 700,
-              border: "none",
-              borderLeft: "1px solid rgba(0,0,0,0.1)",
-              cursor: "pointer",
-              background: (conv as any).client_type === "soporte" ? "#0891b2" : "#fff",
-              color: (conv as any).client_type === "soporte" ? "#fff" : "#475569",
-            }}
-          >🛟 Soporte</button>
-        </div>
-
-        {/* Cobrar — genera link Stripe y opcionalmente lo envía por WhatsApp */}
-        <button
-          type="button"
-          onClick={() => setPaymentModalOpen(true)}
-          title="Generar link de pago Stripe"
-          style={{
-            padding: "5px 11px",
-            fontSize: 11,
-            fontWeight: 800,
-            borderRadius: 6,
-            border: "none",
-            cursor: "pointer",
-            background: "linear-gradient(135deg, #635bff 0%, #4f46e5 100%)",
-            color: "#fff",
-            letterSpacing: 0.3,
-          }}
-        >💳 Cobrar</button>
-
-        {/* Marcar como vendida */}
-        {!(conv.purchase_status === "pagado" || conv.paid_at || conv.status === "pagado") ? (
-          <button
-            type="button"
-            onClick={markAsSold}
-            disabled={savingSale}
-            title="Marcar conversación como vendida (registra importe + fecha)"
-            style={{
-              padding: "5px 12px",
-              fontSize: 11,
-              fontWeight: 800,
-              borderRadius: 6,
-              border: "none",
-              cursor: savingSale ? "default" : "pointer",
-              background: savingSale ? "rgba(0,0,0,0.08)" : "linear-gradient(135deg, #16a34a 0%, #22c55e 100%)",
-              color: savingSale ? "#888" : "#fff",
-              boxShadow: savingSale ? "none" : "0 2px 8px rgba(22,163,74,0.3)",
-              letterSpacing: 0.3,
-            }}
+            style={{ ...selectStyle, width: "100%" }}
+            title="Psicóloga asignada"
           >
-            {savingSale ? "⏳" : "💰 Marcar vendida"}
-          </button>
-        ) : (
+            <option value="">— sin asignar —</option>
+            {psychologists.map((p) => {
+              const full = p.current_patients != null && p.max_patients != null && p.current_patients >= p.max_patients;
+              return (
+                <option key={p.id} value={p.id} disabled={!p.is_accepting_patients}>
+                  {p.name?.trim()}{p.specialty ? ` · ${p.specialty}` : ""}{full ? " ⚠️" : ""}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+
+        {/* Agente */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: "1 1 180px", minWidth: 140 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.4 }}>Agente</span>
+          <select
+            value={conv.assigned_to ?? ""}
+            onChange={(e) => patchConv({ assigned_to: e.target.value || null })}
+            style={{ ...selectStyle, width: "100%" }}
+            title="Agente asignado"
+          >
+            <option value="">— sin asignar —</option>
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name?.trim()} {a.agent_type ? `· ${a.agent_type}` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Indicador pagó (read-only, sutil) */}
+        {(conv.purchase_status === "pagado" || conv.paid_at || conv.status === "pagado") && (
           <span
             style={{
-              padding: "5px 10px",
+              padding: "5px 9px",
               fontSize: 10.5,
               fontWeight: 800,
               borderRadius: 6,
               background: "rgba(16,185,129,0.14)",
               color: "#065f46",
               letterSpacing: 0.4,
+              flexShrink: 0,
+              alignSelf: "flex-end",
             }}
             title={`Pagó ${conv.purchase_amount ?? ""}€ ${conv.paid_at ? `el ${new Date(conv.paid_at).toLocaleDateString("es-ES")}` : ""}`}
           >
-            ✅ VENDIDA{conv.purchase_amount ? ` · ${conv.purchase_amount}€` : ""}
+            ✅ {conv.purchase_amount ? `${conv.purchase_amount}€` : "PAGÓ"}
           </span>
         )}
-
       </div>
 
       {/* Banner del número asignado — memoria persistente del routing */}

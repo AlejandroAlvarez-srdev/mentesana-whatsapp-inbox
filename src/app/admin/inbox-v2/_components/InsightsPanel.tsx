@@ -346,7 +346,37 @@ function ProfileTab({
         )}
       </Section>
 
-      <Section title="💳 Pagos">
+      <Section title="💳 Pagos / Cobrar">
+        <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== "undefined" && profile.conversation.id) {
+                window.dispatchEvent(new CustomEvent("inbox:open-payment", { detail: { conversationId: profile.conversation.id } }));
+              }
+            }}
+            style={{
+              padding: "7px 12px", fontSize: 11.5, fontWeight: 800, borderRadius: 8, border: "none", cursor: "pointer",
+              background: "linear-gradient(135deg, #635bff 0%, #4f46e5 100%)", color: "#fff", letterSpacing: 0.3,
+              boxShadow: "0 2px 8px rgba(99,91,255,0.3)",
+            }}
+          >💳 Generar link de pago</button>
+          {!(profile.conversation.purchase_status === "pagado" || (profile.conversation as any).paid_at) && (
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window !== "undefined" && profile.conversation.id) {
+                  window.dispatchEvent(new CustomEvent("inbox:mark-sold", { detail: { conversationId: profile.conversation.id } }));
+                }
+              }}
+              style={{
+                padding: "7px 12px", fontSize: 11.5, fontWeight: 800, borderRadius: 8, border: "none", cursor: "pointer",
+                background: "linear-gradient(135deg, #16a34a 0%, #22c55e 100%)", color: "#fff", letterSpacing: 0.3,
+                boxShadow: "0 2px 8px rgba(22,163,74,0.3)",
+              }}
+            >💰 Marcar vendida</button>
+          )}
+        </div>
         {profile.payments.length === 0 ? (
           <div style={{ fontSize: 11, color: "#aaa" }}>Sin pagos registrados.</div>
         ) : (
