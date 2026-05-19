@@ -21,12 +21,16 @@ function fmtMadrid(iso: string) {
   return new Intl.DateTimeFormat("es-ES", { timeZone: "Europe/Madrid", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso));
 }
 
+type Provider = { id: number; name: string; email: string | null };
+
 export default function AmeliaToolsTab({ phone, email, conversationId }: { phone: string | null; email: string | null; conversationId: string | null }) {
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [scheduling, setScheduling] = useState<{ service: PackageService } | null>(null);
   const [rescheduling, setRescheduling] = useState<Appt | null>(null);
+  const [changingProvider, setChangingProvider] = useState<Appt | null>(null);
+  const [providers, setProviders] = useState<Provider[]>([]);
 
   async function load() {
     if (!phone && !email) { setLoading(false); return; }
@@ -46,20 +50,42 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
   }
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [phone, email]);
 
+  useEffect(() => {
+    fetch("/api/agent/amelia/providers", { credentials: "include" })
+      .then((r) => r.ok ? r.json() : { providers: [] })
+      .then((d) => setProviders(d.providers ?? []));
+  }, []);
+
   if (loading && !data) return <div style={{ padding: 12, color: "#888", fontSize: 12 }}>Cargando bonos y citas Amelia…</div>;
   if (err) return <div style={{ padding: 10, background: "#fef2f2", color: "#991b1b", borderRadius: 8, fontSize: 12 }}>⚠️ {err}</div>;
   if (!data?.customer) {
     return (
-      <div style={{ padding: 12, background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, fontSize: 12, color: "#92400e" }}>
-        ⚠️ Este lead no aparece en Amelia (busqué por phone y email). Si compró por la web, debería estar — verifica que phone/email del perfil coincida.
+      <div style={{ padding: 24, textAlign: "center", background: "linear-gradient(135deg, rgba(245,158,11,0.04), rgba(245,158,11,0.02))", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 12 }}>
+        <div style={{ fontSize: 36, marginBottom: 8 }}>🚫</div>
+        <strong style={{ fontSize: 14, color: "#92400e", display: "block", marginBottom: 6 }}>No es cliente de Amelia</strong>
+        <p style={{ fontSize: 12, color: "#92400e", margin: "0 0 4px", lineHeight: 1.5 }}>
+          Este lead no aparece en la base de Amelia ni por teléfono ni por email.
+        </p>
+        <p style={{ fontSize: 11, color: "#a16207", margin: 0, lineHeight: 1.5 }}>
+          Las herramientas (bonos · agendar · cancelar · Meet) solo están disponibles para clientes que hayan comprado por la web.
+        </p>
       </div>
     );
   }
+
+  // Si es cliente pero NO tiene bonos NI citas próximas NI pasadas, también es un caso limitado
+  const hasAnyData = data.packages.length > 0 || data.upcoming.length > 0 || data.past.length > 0;
 
   const c = data.customer;
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
+      {!hasAnyData && (
+        <div style={{ padding: 10, background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 8, fontSize: 11.5, color: "#92400e" }}>
+          ℹ️ Cliente registrado en Amelia pero sin bonos ni citas. No hay nada que gestionar todavía.
+        </div>
+      )}
+
       {/* Resumen cliente */}
       <section style={{ padding: 10, background: "rgba(106,23,140,0.04)", borderRadius: 10, border: `1px solid ${PURPLE}22` }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: PURPLE }}>👤 {c.name} <span style={{ fontSize: 10, color: "#888", marginLeft: 6, fontWeight: 600 }}>Amelia ID {c.id}</span></div>
@@ -90,7 +116,9 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
               <ApptRow
                 key={a.appointment_id}
                 a={a}
+                conversationId={conversationId}
                 onReschedule={() => setRescheduling(a)}
+                onChangeProvider={() => setChangingProvider(a)}
                 onCancel={async () => {
                   if (!confirm(`Cancelar cita del ${fmtMadrid(a.booking_start_utc)} con ${a.provider_name}?`)) return;
                   const r = await fetch("/api/agent/amelia/booking-action", {
@@ -145,6 +173,15 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
           conversationId={conversationId}
           onClose={() => setRescheduling(null)}
           onRescheduled={() => { setRescheduling(null); void load(); }}
+        />
+      )}
+      {changingProvider && (
+        <ChangeProviderModal
+          appt={changingProvider}
+          providers={providers}
+          conversationId={conversationId}
+          onClose={() => setChangingProvider(null)}
+          onChanged={() => { setChangingProvider(null); void load(); }}
         />
       )}
     </div>
@@ -210,7 +247,26 @@ function PackageCard({ p, onSchedule }: { p: Package; onSchedule: (svc: PackageS
   );
 }
 
-function ApptRow({ a, onReschedule, onCancel }: { a: Appt; onReschedule: () => void; onCancel: () => Promise<void> }) {
+function ApptRow({ a, conversationId, onReschedule, onChangeProvider, onCancel }: { a: Appt; conversationId: string | null; onReschedule: () => void; onChangeProvider: () => void; onCancel: () => Promise<void> }) {
+  const [sendingMeet, setSendingMeet] = useState(false);
+
+  async function sendMeetToChat() {
+    if (!conversationId || !a.google_meet_url) return;
+    if (!confirm(`¿Enviar el link de Meet por WhatsApp en esta conversación?`)) return;
+    setSendingMeet(true);
+    try {
+      const r = await fetch("/api/agent/amelia/send-meet-whatsapp", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: conversationId, appointment_id: a.appointment_id }),
+      });
+      const d = await r.json();
+      if (r.ok) alert("✅ Meet enviado por WhatsApp");
+      else alert("❌ " + (d.message ?? d.error ?? "Error enviando"));
+    } finally { setSendingMeet(false); }
+  }
+
   return (
     <div style={{ padding: 9, background: "#fff", borderRadius: 8, border: "1px solid rgba(0,0,0,0.06)", display: "grid", gap: 4 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, flexWrap: "wrap" }}>
@@ -226,8 +282,14 @@ function ApptRow({ a, onReschedule, onCancel }: { a: Appt; onReschedule: () => v
           📹 {a.google_meet_url}
         </a>
       )}
-      <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
+      <div style={{ display: "flex", gap: 5, marginTop: 4, flexWrap: "wrap" }}>
+        {a.google_meet_url && conversationId && (
+          <button onClick={() => void sendMeetToChat()} disabled={sendingMeet} style={{ ...smallBtn(true), opacity: sendingMeet ? 0.5 : 1 }}>
+            {sendingMeet ? "Enviando…" : "📨 Reenviar Meet"}
+          </button>
+        )}
         <button onClick={onReschedule} style={smallBtn(false)}>🔄 Reagendar</button>
+        <button onClick={onChangeProvider} style={smallBtn(false)}>👩‍⚕️ Cambiar psi</button>
         <button onClick={() => void onCancel()} style={smallBtnDanger}>❌ Cancelar</button>
         <a href={a.amelia_admin_url} target="_blank" rel="noreferrer" style={{ ...smallBtn(false), textDecoration: "none", marginLeft: "auto" }}>🔗 Admin</a>
       </div>
@@ -392,6 +454,71 @@ function RescheduleModal({ appt, conversationId, onClose, onRescheduled }: { app
         <button onClick={onClose} style={smallBtn(false)}>Cancelar</button>
         <button onClick={doIt} disabled={!picked || saving} style={{ ...primaryBtn, opacity: !picked || saving ? 0.5 : 1, cursor: !picked || saving ? "default" : "pointer" }}>
           {saving ? "Reagendando…" : "✅ Confirmar nuevo horario"}
+        </button>
+      </ModalFooter>
+    </ModalShell>
+  );
+}
+
+function ChangeProviderModal({ appt, providers, conversationId, onClose, onChanged }: { appt: Appt; providers: Provider[]; conversationId: string | null; onClose: () => void; onChanged: () => void }) {
+  const [picked, setPicked] = useState<number | null>(null);
+  const [filter, setFilter] = useState("");
+  const [saving, setSaving] = useState(false);
+  const filtered = useMemo(() => {
+    const q = filter.toLowerCase();
+    return providers
+      .filter((p) => p.id !== appt.provider_id)
+      .filter((p) => q ? p.name.toLowerCase().includes(q) || (p.email ?? "").toLowerCase().includes(q) : true);
+  }, [providers, filter, appt.provider_id]);
+
+  async function go() {
+    if (!picked) return;
+    setSaving(true);
+    try {
+      const r = await fetch("/api/agent/amelia/booking-action", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "change_provider", appointment_id: appt.appointment_id, new_provider_id: picked, conversation_id: conversationId }),
+      });
+      const d = await r.json();
+      if (r.ok) {
+        const meetMsg = d.result?.google_meet_url
+          ? `\n📹 Nuevo Meet: ${d.result.google_meet_url}`
+          : d.result?.meet_warnings?.length ? `\n⚠️ Meet no se pudo crear (${d.result.meet_warnings[0].slice(0,100)})` : "";
+        alert(`✅ Psicóloga cambiada${meetMsg}`);
+        onChanged();
+      } else alert("❌ " + (d.friendly ?? d.error ?? "Error cambiando psicóloga"));
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <ModalShell title="👩‍⚕️ Cambiar psicóloga de la cita" subtitle={`Cita ${fmtMadrid(appt.booking_start_utc)} actualmente con ${appt.provider_name ?? "—"}`} onClose={onClose}>
+      <input
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="Buscar por nombre o email…"
+        style={{ width: "100%", padding: "7px 10px", fontSize: 12, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, fontFamily: "inherit", marginBottom: 10, boxSizing: "border-box" }}
+      />
+      <div style={{ maxHeight: 320, overflow: "auto", display: "grid", gap: 4 }}>
+        {filtered.length === 0 && <div style={{ color: "#aaa", fontSize: 12, padding: 16, textAlign: "center" }}>Sin resultados.</div>}
+        {filtered.map((p) => (
+          <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: 8, background: picked === p.id ? "rgba(106,23,140,0.08)" : "#fff", border: `1px solid ${picked === p.id ? PURPLE : "rgba(0,0,0,0.06)"}`, borderRadius: 8, cursor: "pointer" }}>
+            <input type="radio" checked={picked === p.id} onChange={() => setPicked(p.id)} style={{ accentColor: PURPLE }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1a2e" }}>{p.name}</div>
+              {p.email && <div style={{ fontSize: 10.5, color: "#888" }}>{p.email}</div>}
+            </div>
+          </label>
+        ))}
+      </div>
+      <div style={{ marginTop: 10, padding: 10, background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 8, fontSize: 11, color: "#92400e" }}>
+        ⚠️ Se borrará el Meet de la psicóloga anterior y se creará uno nuevo con la nueva. La hora y el bono se mantienen.
+      </div>
+      <ModalFooter>
+        <button onClick={onClose} style={smallBtn(false)}>Cancelar</button>
+        <button onClick={go} disabled={!picked || saving} style={{ ...primaryBtn, opacity: !picked || saving ? 0.5 : 1, cursor: !picked || saving ? "default" : "pointer" }}>
+          {saving ? "Cambiando…" : "✅ Confirmar cambio"}
         </button>
       </ModalFooter>
     </ModalShell>
