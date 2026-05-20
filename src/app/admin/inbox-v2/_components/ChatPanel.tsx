@@ -393,6 +393,21 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
               }}
             >🛟 Soporte</button>
           </div>
+          {!(conv as any).client_type && (
+            <button
+              type="button"
+              onClick={async () => {
+                const r = await fetch(`/api/agent/auto-route/${conv.id}`, { method: "POST", credentials: "include" });
+                const d = await r.json();
+                if (r.ok) {
+                  alert(`🤖 IA decidió: ${d.client_type} (${Math.round(d.confidence * 100)}%)\n\n${d.reason}`);
+                  setConv((c) => c ? ({ ...c, client_type: d.client_type } as any) : c);
+                } else alert("❌ " + (d.message ?? d.error));
+              }}
+              title="Que la IA decida si esta conv es ventas o soporte"
+              style={{ marginTop: 4, padding: "3px 8px", fontSize: 10, fontWeight: 700, borderRadius: 6, border: `1px dashed ${PURPLE}`, background: "rgba(106,23,140,0.05)", color: PURPLE, cursor: "pointer" }}
+            >🤖 Auto-route IA</button>
+          )}
         </div>
 
         {/* Pipeline / etapa */}
