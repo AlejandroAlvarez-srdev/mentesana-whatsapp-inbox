@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { parseUtc, fmtMadridDateTime } from "./_time";
 
 export type WindowInfo = {
   conversation_id?: string;
@@ -40,21 +41,21 @@ export default function WindowBadge({ info, compact, withCountdown }: { info: Wi
 
   const live = (() => {
     if (!info.expires_at) return info.minutes_left;
-    const diff = new Date(info.expires_at).getTime() - Date.now();
+    const diff = parseUtc(info.expires_at).getTime() - Date.now();
     return Math.max(0, Math.floor(diff / 60000));
   })();
   const c = colorFor(info.window_status);
 
   if (compact) {
     return (
-      <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: c.bg, color: c.fg, fontWeight: 700, whiteSpace: "nowrap" }} title={info.expires_at ? `expira ${new Date(info.expires_at).toLocaleString("es-ES", { timeZone: "Europe/Madrid" })}` : ""}>
+      <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: c.bg, color: c.fg, fontWeight: 700, whiteSpace: "nowrap" }} title={info.expires_at ? `expira ${fmtMadridDateTime(info.expires_at)}` : ""}>
         {c.label} {withCountdown && live != null && info.window_status !== "expired" && info.window_status !== "never_inbound" ? `· ${fmtMinutesLeft(live)}` : ""}
       </span>
     );
   }
 
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, padding: "3px 9px", borderRadius: 6, background: c.bg, color: c.fg, fontWeight: 700, border: `1px solid ${c.border}` }} title={info.expires_at ? `expira ${new Date(info.expires_at).toLocaleString("es-ES", { timeZone: "Europe/Madrid" })}` : ""}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, padding: "3px 9px", borderRadius: 6, background: c.bg, color: c.fg, fontWeight: 700, border: `1px solid ${c.border}` }} title={info.expires_at ? `expira ${fmtMadridDateTime(info.expires_at)}` : ""}>
       <span>{c.label}</span>
       {withCountdown && live != null && info.window_status !== "expired" && info.window_status !== "never_inbound" && <span style={{ opacity: 0.8 }}>· {fmtMinutesLeft(live)}</span>}
     </span>

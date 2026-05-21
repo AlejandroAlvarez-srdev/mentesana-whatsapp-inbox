@@ -70,6 +70,12 @@ export default function TemplatesModal({
   const [headerVars, setHeaderVars] = useState<string[]>([]);
   const [headerMediaUrl, setHeaderMediaUrl] = useState("");
 
+  // Programar plantilla (scheduler)
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduleAt, setScheduleAt] = useState(""); // datetime-local string en hora Madrid
+  const [scheduling, setScheduling] = useState(false);
+  const [scheduleResult, setScheduleResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
   useEffect(() => {
     if (!open) return;
     setSingleResult(null);
@@ -239,6 +245,61 @@ export default function TemplatesModal({
     } catch (e: any) {
       setSingleResult({ ok: false, msg: String(e.message ?? e) });
     } finally { setSending(false); }
+  }
+
+  async function scheduleTemplate() {
+    if (!selected) return;
+    const ready = readyToSend();
+    if (!ready.ok) { setScheduleResult({ ok: false, msg: ready.reason ?? "no listo" }); return; }
+    if (!scheduleAt) { setScheduleResult({ ok: false, msg: "Elige fecha y hora" }); return; }
+    const when = new Date(scheduleAt);
+    if (Number.isNaN(when.getTime()) || when.getTime() < Date.now() + 30_000) { setScheduleResult({ ok: false, msg: "La hora debe ser futura (≥30s)" }); return; }
+
+    setScheduling(true);
+    setScheduleResult(null);
+    try {
+      let payload: any;
+      if (mode === "single") {
+        if (!conversation) { setScheduleResult({ ok: false, msg: "Sin conversación seleccionada" }); return; }
+        payload = {
+          scope: "single",
+          conversation_id: conversation.id,
+          template_name: selected.name,
+          language: selected.language,
+          from_number: fromNumberId,
+          components: buildComponents(),
+          scheduled_for: scheduleAt,
+        };
+      } else {
+        const total = personalize ? validRecipientsCount : parsedPhones.length;
+        if (total === 0 || total > 500) { setScheduleResult({ ok: false, msg: `Total inválido: ${total}` }); return; }
+        payload = {
+          scope: "bulk",
+          template_name: selected.name,
+          language: selected.language,
+          from_number: fromNumberId,
+          scheduled_for: scheduleAt,
+        };
+        if (personalize) payload.recipients = buildRecipientsForBulk();
+        else { payload.phones = parsedPhones; payload.components = buildComponents(); }
+      }
+      const r = await fetch(`${apiBase}/scheduled-templates`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        setScheduleResult({ ok: true, msg: `Programada para ${new Date(scheduleAt).toLocaleString("es-ES", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })}` });
+        setScheduleAt("");
+        setScheduleOpen(false);
+      } else {
+        setScheduleResult({ ok: false, msg: `${r.status} · ${j.error ?? "error"}` });
+      }
+    } catch (e: any) {
+      setScheduleResult({ ok: false, msg: String(e?.message ?? e) });
+    } finally { setScheduling(false); }
   }
 
   async function sendBulk() {
@@ -437,9 +498,15 @@ export default function TemplatesModal({
                     A: <strong>{conversation.lead_name?.trim() || "(sin nombre)"}</strong> <span style={{ color: "#888" }}>· {conversation.phone}</span>
                   </div>
                 ) : null}
-                <button onClick={sendSingle} disabled={!conversation || !readyToSend().ok || sending} style={primaryBtn(!conversation || !readyToSend().ok || sending)}>
-                  {sending ? "Enviando…" : `Enviar plantilla`}
-                </button>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button onClick={sendSingle} disabled={!conversation || !readyToSend().ok || sending} style={{ ...primaryBtn(!conversation || !readyToSend().ok || sending), flex: 1, minWidth: 180 }}>
+                    {sending ? "Enviando…" : `📤 Enviar ahora`}
+                  </button>
+                  <button onClick={() => setScheduleOpen(v => !v)} disabled={!conversation || !readyToSend().ok || sending} style={{ ...secondaryBtn(!conversation || !readyToSend().ok || sending), minWidth: 140 }}>
+                    {scheduleOpen ? "↑ Ocultar" : "⏰ Programar"}
+                  </button>
+                </div>
+                {scheduleOpen && <ScheduleBox scheduleAt={scheduleAt} setScheduleAt={setScheduleAt} onSchedule={scheduleTemplate} scheduling={scheduling} result={scheduleResult} />}
                 {!readyToSend().ok && selected && conversation && <div style={{ fontSize: 10, color: "#dc2626", marginTop: 4 }}>{readyToSend().reason}</div>}
                 {singleResult && <div style={{ marginTop: 10, padding: 9, borderRadius: 8, background: singleResult.ok ? "#ecfdf5" : "#fef2f2", color: singleResult.ok ? "#065f46" : "#991b1b", fontSize: 12, border: `1px solid ${singleResult.ok ? "#a7f3d0" : "#fecaca"}` }}>{singleResult.ok ? "✅ " : "❌ "}{singleResult.msg}</div>}
               </>
@@ -494,9 +561,15 @@ export default function TemplatesModal({
                   </details>
                 )}
 
-                <button onClick={sendBulk} disabled={!readyToSend().ok || validRecipientsCount === 0 || validRecipientsCount > 500 || sending} style={primaryBtn(!readyToSend().ok || validRecipientsCount === 0 || validRecipientsCount > 500 || sending)}>
-                  {sending ? `Enviando a ${validRecipientsCount}…` : `📤 Enviar a ${validRecipientsCount} contacto${validRecipientsCount === 1 ? "" : "s"}`}
-                </button>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button onClick={sendBulk} disabled={!readyToSend().ok || validRecipientsCount === 0 || validRecipientsCount > 500 || sending} style={{ ...primaryBtn(!readyToSend().ok || validRecipientsCount === 0 || validRecipientsCount > 500 || sending), flex: 1, minWidth: 220 }}>
+                    {sending ? `Enviando a ${validRecipientsCount}…` : `📤 Enviar a ${validRecipientsCount} contacto${validRecipientsCount === 1 ? "" : "s"}`}
+                  </button>
+                  <button onClick={() => setScheduleOpen(v => !v)} disabled={!readyToSend().ok || validRecipientsCount === 0 || validRecipientsCount > 500 || sending} style={{ ...secondaryBtn(!readyToSend().ok || validRecipientsCount === 0 || validRecipientsCount > 500 || sending), minWidth: 140 }}>
+                    {scheduleOpen ? "↑ Ocultar" : "⏰ Programar"}
+                  </button>
+                </div>
+                {scheduleOpen && <ScheduleBox scheduleAt={scheduleAt} setScheduleAt={setScheduleAt} onSchedule={scheduleTemplate} scheduling={scheduling} result={scheduleResult} />}
                 {!readyToSend().ok && selected && <div style={{ fontSize: 10, color: "#dc2626", marginTop: 4 }}>{readyToSend().reason}</div>}
                 {bulkResult && (
                   <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: bulkResult.success === bulkResult.total ? "#ecfdf5" : bulkResult.success === 0 ? "#fef2f2" : "#fffbeb", border: `1px solid ${bulkResult.success === bulkResult.total ? "#a7f3d0" : bulkResult.success === 0 ? "#fecaca" : "#fde68a"}`, fontSize: 12 }}>
@@ -639,6 +712,47 @@ const errBox: React.CSSProperties = { padding: 10, margin: "10px 20px", backgrou
 const lblStyle: React.CSSProperties = { fontSize: 10, color: "#888", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 3, display: "block" };
 const inputStyle: React.CSSProperties = { width: "100%", padding: "7px 10px", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6, fontSize: 12, boxSizing: "border-box" };
 const primaryBtn = (disabled: boolean): React.CSSProperties => ({ padding: "11px 18px", borderRadius: 8, border: "none", background: disabled ? "rgba(0,0,0,0.06)" : PURPLE, color: disabled ? "#888" : "#fff", fontSize: 13, fontWeight: 700, cursor: disabled ? "default" : "pointer" });
+const secondaryBtn = (disabled: boolean): React.CSSProperties => ({ padding: "11px 16px", borderRadius: 8, border: `1.5px solid ${disabled ? "rgba(0,0,0,0.1)" : PURPLE}`, background: "#fff", color: disabled ? "#888" : PURPLE, fontSize: 13, fontWeight: 700, cursor: disabled ? "default" : "pointer" });
+
+function ScheduleBox({ scheduleAt, setScheduleAt, onSchedule, scheduling, result }: { scheduleAt: string; setScheduleAt: (v: string) => void; onSchedule: () => void; scheduling: boolean; result: { ok: boolean; msg: string } | null }) {
+  // datetime-local: el navegador lo trata como hora local; en producción (Spain) eso es Madrid.
+  // Sugerimos defaults amigables: en 1h, mañana 10:00, mañana 18:00.
+  function quickSet(offsetMin: number) {
+    const d = new Date(Date.now() + offsetMin * 60_000);
+    // Formatear como datetime-local "YYYY-MM-DDTHH:mm"
+    const pad = (n: number) => String(n).padStart(2, "0");
+    setScheduleAt(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+  }
+  function tomorrowAt(hour: number) {
+    const d = new Date(Date.now() + 86_400_000);
+    d.setHours(hour, 0, 0, 0);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    setScheduleAt(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+  }
+  return (
+    <div style={{ marginTop: 10, padding: 12, background: "rgba(106,23,140,0.05)", borderRadius: 10, border: `1px solid ${PURPLE}33` }}>
+      <div style={{ fontSize: 11, fontWeight: 800, color: PURPLE, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>⏰ Programar envío (hora España)</div>
+      <input
+        type="datetime-local"
+        value={scheduleAt}
+        onChange={(e) => setScheduleAt(e.target.value)}
+        min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+        style={{ ...inputStyle, padding: "9px 12px", fontSize: 14 }}
+      />
+      <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+        <button onClick={() => quickSet(60)} style={chipBtn}>+1h</button>
+        <button onClick={() => quickSet(180)} style={chipBtn}>+3h</button>
+        <button onClick={() => tomorrowAt(10)} style={chipBtn}>Mañana 10:00</button>
+        <button onClick={() => tomorrowAt(18)} style={chipBtn}>Mañana 18:00</button>
+      </div>
+      <button onClick={onSchedule} disabled={scheduling || !scheduleAt} style={{ ...primaryBtn(scheduling || !scheduleAt), marginTop: 10, width: "100%" }}>
+        {scheduling ? "Programando…" : "✓ Confirmar programación"}
+      </button>
+      {result && <div style={{ marginTop: 8, padding: 8, borderRadius: 6, background: result.ok ? "#ecfdf5" : "#fef2f2", color: result.ok ? "#065f46" : "#991b1b", fontSize: 12, fontWeight: 600 }}>{result.ok ? "✅ " : "❌ "}{result.msg}</div>}
+    </div>
+  );
+}
+const chipBtn: React.CSSProperties = { padding: "5px 10px", borderRadius: 999, border: `1px solid ${PURPLE}55`, background: "#fff", color: PURPLE, fontSize: 11, fontWeight: 700, cursor: "pointer" };
 
 function ImportFromInboxButton({ apiBase, fromNumberId, onImport, disabled }: { apiBase: string; fromNumberId: string; onImport: (phones: string[]) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);

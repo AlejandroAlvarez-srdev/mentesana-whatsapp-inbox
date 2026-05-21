@@ -6,6 +6,7 @@ import PipelinePanel from "@/app/agent/_components/PipelinePanel";
 import EmailSuggestModal from "./EmailSuggestModal";
 import AmeliaToolsTab from "./AmeliaToolsTab";
 import LeadScoreBadge from "./LeadScoreBadge";
+import { fmtMadridDate } from "./_time";
 
 const PURPLE = "#6A178C";
 
@@ -437,7 +438,7 @@ function ProfileTab({
                 <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>
                   {p.psychologist && <span>👩‍⚕️ {p.psychologist} · </span>}
                   {p.source && <span>{p.source} · </span>}
-                  {new Date(p.created_at).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid" })}
+                  {fmtMadridDate(p.created_at)}
                 </div>
               </div>
             ))}

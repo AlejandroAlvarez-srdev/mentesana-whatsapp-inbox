@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useConversationsRealtime } from "../_hooks/useInboxRealtime";
+import { parseUtc } from "./_time";
 
 const PURPLE = "#6A178C";
 
@@ -537,7 +538,7 @@ function colorFromString(s: string): string {
 
 // Hora siempre en horario España (Europe/Madrid) — nunca "ahora" / "now"
 function fmtRel(iso: string): string {
-  const d = new Date(iso);
+  const d = parseUtc(iso);
   const now = new Date();
   const tz = "Europe/Madrid";
   const sameDay = d.toLocaleDateString("es-ES", { timeZone: tz }) === now.toLocaleDateString("es-ES", { timeZone: tz });

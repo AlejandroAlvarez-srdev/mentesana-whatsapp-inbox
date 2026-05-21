@@ -6,6 +6,7 @@ import ProposeAppointmentModal from "./ProposeAppointmentModal";
 import ChatExtrasMenu from "./ChatExtrasMenu";
 import WindowBadge, { WindowInfo, fmtMinutesLeft, colorFor } from "./WindowBadge";
 import { useMessagesRealtime } from "../_hooks/useInboxRealtime";
+import { parseUtc, fmtMadridDateTime, fmtMadridDate } from "./_time";
 
 const PURPLE = "#6A178C";
 
@@ -530,7 +531,7 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
               flexShrink: 0,
               alignSelf: "flex-end",
             }}
-            title={`Pagó ${conv.purchase_amount ?? ""}€ ${conv.paid_at ? `el ${new Date(conv.paid_at).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid" })}` : ""}`}
+            title={`Pagó ${conv.purchase_amount ?? ""}€ ${conv.paid_at ? `el ${fmtMadridDate(conv.paid_at)}` : ""}`}
           >
             ✅ {conv.purchase_amount ? `${conv.purchase_amount}€` : "PAGÓ"}
           </span>
@@ -1199,10 +1200,8 @@ function Tag({ label, color, solid }: { label: string; color: string; solid?: bo
   return <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 700, background: solid ? color : `${color}1a`, color: solid ? "#fff" : color, textTransform: "uppercase" }}>{label}</span>;
 }
 
-// Siempre hora España (Europe/Madrid)
 function fmtTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleString("es-ES", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+  return fmtMadridDateTime(iso);
 }
 
 const emptyStyle: React.CSSProperties = { background: "#fff", borderRadius: 12, border: "1px solid rgba(0,0,0,0.06)", display: "flex", alignItems: "center", justifyContent: "center" };
@@ -1236,7 +1235,7 @@ function WindowBanner({ info }: { info: WindowInfo }) {
     }
   }, [info.window_status]);
 
-  const live = info.expires_at ? Math.max(0, Math.floor((new Date(info.expires_at).getTime() - Date.now()) / 60000)) : null;
+  const live = info.expires_at ? Math.max(0, Math.floor((parseUtc(info.expires_at).getTime() - Date.now()) / 60000)) : null;
   const c = colorFor(info.window_status);
 
   let cta: React.ReactNode = null;
@@ -1252,11 +1251,11 @@ function WindowBanner({ info }: { info: WindowInfo }) {
       {info.expires_at && info.window_status !== "expired" && info.window_status !== "never_inbound" && (
         <>
           <span style={{ color: c.fg }}>· quedan <strong>{fmtMinutesLeft(live)}</strong></span>
-          <span style={{ color: c.fg, opacity: 0.7 }}>· expira {new Date(info.expires_at).toLocaleString("es-ES", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+          <span style={{ color: c.fg, opacity: 0.7 }}>· expira {parseUtc(info.expires_at).toLocaleString("es-ES", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
         </>
       )}
       {info.window_status === "expired" && info.last_inbound_at && (
-        <span style={{ color: c.fg, opacity: 0.7 }}>· última inbound {new Date(info.last_inbound_at).toLocaleString("es-ES", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+        <span style={{ color: c.fg, opacity: 0.7 }}>· última inbound {parseUtc(info.last_inbound_at).toLocaleString("es-ES", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
       )}
       {cta}
     </div>

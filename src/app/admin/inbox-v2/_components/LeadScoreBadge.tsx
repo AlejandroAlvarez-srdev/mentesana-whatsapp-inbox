@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { fmtMadridDateTime } from "./_time";
 
 const PURPLE = "#6A178C";
 
@@ -66,7 +67,7 @@ export default function LeadScoreBadge({ conversationId, compact = false }: { co
           ✅ {data.features.similar_paid_count} pagados similares (sim {data.features.avg_paid_similarity})<br />
           ❌ {data.features.similar_lost_count} perdidos similares (sim {data.features.avg_lost_similarity})<br />
           {data.features.sentiment && <>🎭 sentimiento: {data.features.sentiment}<br /></>}
-          🕒 {new Date(data.scored_at).toLocaleString("es-ES", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })} {data.cached ? "· cache" : "· fresh"}
+          🕒 {fmtMadridDateTime(data.scored_at)} {data.cached ? "· cache" : "· fresh"}
         </div>
       )}
     </div>
