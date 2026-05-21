@@ -29,10 +29,14 @@ export default function ConversationList({
   selectedId,
   onSelect,
   apiBase = "/api/admin/inbox-v2",
+  initialFilter = null,
 }: {
   selectedId: string | null;
   onSelect: (c: ConvSummary) => void;
   apiBase?: string;
+  // Filtro inicial vía prop (desde URL ?filter=expiring|unread).
+  // Sin esto, el componente carga sin filtros aplicados.
+  initialFilter?: "expiring" | "unread" | "expired" | null;
 }) {
   const PAGE_SIZE = 30;
   const [mode, setMode] = useState<Mode>("list");
@@ -43,7 +47,9 @@ export default function ConversationList({
   const [err, setErr] = useState<string | null>(null);
   const [pipelineFilter, setPipelineFilter] = useState<"" | "ventas" | "soporte">("");
   const [numberFilter, setNumberFilter] = useState("");
-  const [unreadOnly, setUnreadOnly] = useState(false);
+  const [unreadOnly, setUnreadOnly] = useState(initialFilter === "unread");
+  const [expiringOnly, setExpiringOnly] = useState(initialFilter === "expiring");
+  const [expiredOnly, setExpiredOnly] = useState(initialFilter === "expired");
   const [waNumbers, setWaNumbers] = useState<{ phone_number_id: string; name: string; phone_number: string | null }[]>([]);
   const [bulkMode, setBulkMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -104,6 +110,8 @@ export default function ConversationList({
       if (pipelineFilter) params.set("pipeline", pipelineFilter);
       if (numberFilter) params.set("phone_number_id", numberFilter);
       if (unreadOnly) params.set("unread", "true");
+      if (expiringOnly) params.set("window_status", "expiring_soon");
+      if (expiredOnly) params.set("window_status", "expired");
       const r = await fetch(`${apiBase}/conversations?${params}`, { credentials: "include", signal: ac.signal });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
@@ -130,7 +138,7 @@ export default function ConversationList({
     debounceRef.current = window.setTimeout(() => { void loadList(query); }, 250);
     return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, pipelineFilter, numberFilter, unreadOnly]);
+  }, [query, pipelineFilter, numberFilter, unreadOnly, expiringOnly, expiredOnly]);
 
   // Infinite scroll: cuando el sentinel entra en viewport, carga la siguiente página
   useEffect(() => {
@@ -168,6 +176,8 @@ export default function ConversationList({
       if (pipelineFilter) params.set("pipeline", pipelineFilter);
       if (numberFilter) params.set("phone_number_id", numberFilter);
       if (unreadOnly) params.set("unread", "true");
+      if (expiringOnly) params.set("window_status", "expiring_soon");
+      if (expiredOnly) params.set("window_status", "expired");
       const r = await fetch(`${apiBase}/conversations?${params}`, { credentials: "include", signal: ac.signal });
       if (!r.ok) return;
       const d = await r.json();
@@ -198,7 +208,7 @@ export default function ConversationList({
     document.addEventListener("visibilitychange", onVis);
     return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, pipelineFilter, numberFilter, unreadOnly, mode, items.length]);
+  }, [query, pipelineFilter, numberFilter, unreadOnly, expiringOnly, expiredOnly, mode, items.length]);
 
   // Realtime: cuando una conversación cambia (nuevo mensaje del lead, status,
   // unread_count, asignación), refrescamos la lista actual sin recargar todo
@@ -253,7 +263,7 @@ export default function ConversationList({
           <PipelinePill v="soporte" cur={pipelineFilter} set={setPipelineFilter} label="Soporte" />
           <button
             type="button"
-            onClick={() => setUnreadOnly((v) => !v)}
+            onClick={() => { setUnreadOnly((v) => !v); setExpiringOnly(false); setExpiredOnly(false); }}
             style={{
               padding: "3px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: "none", cursor: "pointer",
               background: unreadOnly ? "#dc2626" : "rgba(220,38,38,0.1)",
@@ -262,6 +272,30 @@ export default function ConversationList({
             title="Solo conversaciones sin responder"
           >
             🔴 Sin responder
+          </button>
+          <button
+            type="button"
+            onClick={() => { setExpiringOnly((v) => !v); setUnreadOnly(false); setExpiredOnly(false); }}
+            style={{
+              padding: "3px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: "none", cursor: "pointer",
+              background: expiringOnly ? "#d97706" : "rgba(217,119,6,0.12)",
+              color: expiringOnly ? "#fff" : "#92400e",
+            }}
+            title="Solo conversaciones con ventana 24h por cerrar (<4h)"
+          >
+            ⏰ Expirando
+          </button>
+          <button
+            type="button"
+            onClick={() => { setExpiredOnly((v) => !v); setUnreadOnly(false); setExpiringOnly(false); }}
+            style={{
+              padding: "3px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: "none", cursor: "pointer",
+              background: expiredOnly ? "#475569" : "rgba(71,85,105,0.12)",
+              color: expiredOnly ? "#fff" : "#334155",
+            }}
+            title="Conversaciones cerradas (ventana 24h expirada) — solo plantilla puede reactivar"
+          >
+            🔒 Cerradas
           </button>
           <span style={{ marginLeft: "auto", fontSize: 11, color: "#888" }}>
             {loading && items.length === 0 ? "…" : `${items.length}${total ? ` / ${total.toLocaleString()}` : ""}`}
