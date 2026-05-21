@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 const PURPLE = "#6A178C";
 
@@ -8,31 +9,59 @@ export default function ChatExtrasMenu({ conversationId, leadName, phone }: { co
   const [open, setOpen] = useState(false);
   const [addingList, setAddingList] = useState(false);
   const [assigningTask, setAssigningTask] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; right: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
+  // FIX: el ChatPanel padre tiene overflow:hidden + overflowX:auto, así que un menú
+  // position:absolute queda RECORTADO (invisible). Usamos createPortal + position:fixed
+  // calculando las coordenadas reales del botón con getBoundingClientRect.
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    if (btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setCoords({ top: r.bottom + 4, right: window.innerWidth - r.right });
+    }
+    const onDoc = (e: MouseEvent) => {
+      const tgt = e.target as Node;
+      if (btnRef.current?.contains(tgt)) return;
+      if (menuRef.current?.contains(tgt)) return;
+      setOpen(false);
+    };
+    const onResize = () => {
+      if (btnRef.current) {
+        const r = btnRef.current.getBoundingClientRect();
+        setCoords({ top: r.bottom + 4, right: window.innerWidth - r.right });
+      }
+    };
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    window.addEventListener("resize", onResize);
+    window.addEventListener("scroll", onResize, true);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", onResize, true);
+    };
   }, [open]);
 
   return (
-    <div ref={ref} style={{ position: "relative", flexShrink: 0, alignSelf: "flex-end" }}>
+    <>
       <button
+        ref={btnRef}
         onClick={() => setOpen((o) => !o)}
         title="Más acciones (lista, tarea…)"
-        style={{ padding: "5px 9px", fontSize: 14, fontWeight: 700, borderRadius: 8, border: "1px solid rgba(0,0,0,0.08)", background: "#fff", color: "#475569", cursor: "pointer" }}
+        style={{ padding: "5px 9px", fontSize: 14, fontWeight: 700, borderRadius: 8, border: "1px solid rgba(0,0,0,0.08)", background: open ? "rgba(106,23,140,0.06)" : "#fff", color: open ? PURPLE : "#475569", cursor: "pointer", flexShrink: 0, alignSelf: "flex-end" }}
       >⋯</button>
-      {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, minWidth: 220, background: "#fff", borderRadius: 10, boxShadow: "0 12px 32px rgba(0,0,0,0.15)", border: "1px solid rgba(0,0,0,0.06)", zIndex: 20, overflow: "hidden" }}>
+      {open && coords && typeof document !== "undefined" && createPortal(
+        <div ref={menuRef} style={{ position: "fixed", top: coords.top, right: coords.right, minWidth: 240, background: "#fff", borderRadius: 10, boxShadow: "0 12px 32px rgba(0,0,0,0.18)", border: "1px solid rgba(0,0,0,0.08)", zIndex: 9999, overflow: "hidden" }}>
           <button onClick={() => { setOpen(false); setAddingList(true); }} style={menuItem}>
             ⭐ Añadir a lista de seguimiento
           </button>
           <button onClick={() => { setOpen(false); setAssigningTask(true); }} style={menuItem}>
             📋 Asignar tarea a un agente
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
       {addingList && (
         <AddToListModal conversationId={conversationId} leadName={leadName} phone={phone} onClose={() => setAddingList(false)} />
@@ -40,7 +69,7 @@ export default function ChatExtrasMenu({ conversationId, leadName, phone }: { co
       {assigningTask && (
         <AssignTaskModal conversationId={conversationId} leadName={leadName} phone={phone} onClose={() => setAssigningTask(false)} />
       )}
-    </div>
+    </>
   );
 }
 
