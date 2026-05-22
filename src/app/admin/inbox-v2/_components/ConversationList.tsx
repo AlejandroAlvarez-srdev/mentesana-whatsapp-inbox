@@ -50,6 +50,14 @@ export default function ConversationList({
   const [unreadOnly, setUnreadOnly] = useState(initialFilter === "unread");
   const [expiringOnly, setExpiringOnly] = useState(initialFilter === "expiring");
   const [expiredOnly, setExpiredOnly] = useState(initialFilter === "expired");
+  // Sincroniza con initialFilter cuando llega tarde (page.tsx lo lee del URL en useEffect,
+  // así que en el primer render initialFilter llega null y luego cambia a 'expiring'/'unread'/'expired').
+  // Sin este efecto, el useState(...) inicial sólo aplicaba en mount y los chips quedaban OFF.
+  useEffect(() => {
+    setUnreadOnly(initialFilter === "unread");
+    setExpiringOnly(initialFilter === "expiring");
+    setExpiredOnly(initialFilter === "expired");
+  }, [initialFilter]);
   const [waNumbers, setWaNumbers] = useState<{ phone_number_id: string; name: string; phone_number: string | null }[]>([]);
   const [bulkMode, setBulkMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
