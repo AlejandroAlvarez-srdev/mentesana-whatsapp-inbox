@@ -459,16 +459,30 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
             value={conv.status ?? "sin_contactar"}
             onChange={async (e) => {
               const newStatus = e.target.value;
-              const r = await fetch("/api/agent/conversation-status", {
-                method: "POST",
-                credentials: "include",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ conversation_id: conv.id, status: newStatus }),
-              });
-              if (r.ok) {
-                setConv((c) => c ? ({ ...c, status: newStatus } as any) : c);
-              } else {
-                setErr(`Cambiar etapa: ${r.status}`);
+              try {
+                const r = await fetch("/api/agent/conversation-status", {
+                  method: "POST",
+                  credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ conversation_id: conv.id, status: newStatus }),
+                });
+                if (r.ok) {
+                  setConv((c) => c ? ({ ...c, status: newStatus } as any) : c);
+                } else {
+                  // Parseamos el body para mostrar el error real del backend (antes solo aparecía el HTTP code).
+                  let detail = `HTTP ${r.status}`;
+                  try {
+                    const d = await r.json();
+                    detail = d.error || d.message || d.detail || detail;
+                  } catch {
+                    try { detail = (await r.text()).slice(0, 200) || detail; } catch {}
+                  }
+                  setErr(`Cambiar etapa falló (${r.status}): ${detail}`);
+                  // Revertimos visualmente al status previo
+                  e.target.value = conv.status ?? "sin_contactar";
+                }
+              } catch (netErr: any) {
+                setErr(`Cambiar etapa · red: ${String(netErr?.message ?? netErr).slice(0, 200)}`);
               }
             }}
             title="Etapa del pipeline (drag&drop disponible en /agent/pipelines)"
