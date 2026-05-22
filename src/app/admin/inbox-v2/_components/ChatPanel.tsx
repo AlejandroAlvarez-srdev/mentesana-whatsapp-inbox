@@ -54,6 +54,22 @@ type QuickReply = { id: string; title: string; content: string; shortcut: string
 
 const STATUSES = ["nuevo", "contactado", "asignado", "pagado", "cerrado"] as const;
 
+const AMELIA_SEGMENT_META: Record<string, { label: string; bg: string; fg: string }> = {
+  recurrentes: { label: "🔥 Recurrente", bg: "rgba(139,47,181,0.12)", fg: "#5b21b6" },
+  una_sesion: { label: "1️⃣ 1 sesión", bg: "rgba(8,145,178,0.12)", fg: "#0e7490" },
+  lead_perdido: { label: "🚫 Lead perdido", bg: "rgba(220,38,38,0.12)", fg: "#991b1b" },
+  paquete_historico: { label: "📦 Paquete histórico", bg: "rgba(22,163,74,0.12)", fg: "#065f46" },
+  paquete_vencido: { label: "💀 Paquete vencido", bg: "rgba(220,38,38,0.1)", fg: "#991b1b" },
+  caduca_7d: { label: "🚨 Caduca <7d", bg: "rgba(220,38,38,0.14)", fg: "#991b1b" },
+  caduca_30d: { label: "⏳ Caduca <30d", bg: "rgba(245,158,11,0.14)", fg: "#92400e" },
+  paquete_terminando: { label: "⌛ Paquete acabando", bg: "rgba(245,158,11,0.16)", fg: "#92400e" },
+  inactivos_90d: { label: "💔 Inactivo >90d", bg: "rgba(239,68,68,0.1)", fg: "#9f1239" },
+  reciente_terminada: { label: "🎯 Acaba sesión <7d", bg: "rgba(16,163,74,0.14)", fg: "#065f46" },
+  reservo_sin_pagar: { label: "⏰ Reservó sin pagar", bg: "rgba(245,158,11,0.12)", fg: "#92400e" },
+  diag_sin_bono: { label: "🧠 9,99€ sin bono", bg: "rgba(217,119,6,0.14)", fg: "#7c2d12" },
+  diag_futura: { label: "📆 9,99€ futura", bg: "rgba(8,145,178,0.14)", fg: "#0e7490" },
+};
+
 export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/admin/inbox-v2" }: { conversationId: string | null; onChanged?: () => void; apiBase?: string }) {
   const [conv, setConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -78,6 +94,8 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   // Cache name → body extraído de meta-templates. El backend solo guarda content="[Template X]"
   // como placeholder, así que aquí resolvemos el cuerpo real para mostrarlo en el chat.
   const [templateBodies, setTemplateBodies] = useState<Record<string, string>>({});
+  // Segments / pipelines Amelia a los que pertenece el contacto (recurrente, paquete activo, etc.)
+  const [ameliaSegments, setAmeliaSegments] = useState<string[]>([]);
   useEffect(() => {
     fetch(`${apiBase}/meta-templates`, { credentials: "include" })
       .then(r => r.ok ? r.json() : null)
@@ -117,11 +135,28 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   useEffect(() => {
     setConv(null);
     setMessages([]);
+    setAmeliaSegments([]);
     lastMsgTsRef.current = null;
     lastScrollHeightRef.current = 0; // reset → fuerza scroll al fondo al cargar la nueva conv
     setHasMoreOlder(true);
     void loadFull();
   }, [conversationId, loadFull]);
+
+  // Carga segments Amelia cuando hay phone de la conv (para mostrar de qué pipeline Amelia
+  // es este contacto en el header: recurrente, paquete activo, diag sin bono, etc.).
+  useEffect(() => {
+    if (!conv?.phone) { setAmeliaSegments([]); return; }
+    const phone = conv.phone;
+    let cancelled = false;
+    fetch(`/api/agent/amelia/by-phone/${encodeURIComponent(phone)}`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (cancelled || !d) return;
+        setAmeliaSegments(Array.isArray(d.segments) ? d.segments : []);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [conv?.phone]);
 
   // Listener para que ProfileTab (en InsightsPanel) pueda disparar acciones del header
   useEffect(() => {
@@ -568,6 +603,26 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
             ))}
           </select>
         </div>
+
+        {/* Badges Amelia: segmentos / pipelines a los que pertenece el contacto */}
+        {ameliaSegments.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 3, flexShrink: 0, maxWidth: 260 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: 0.4 }}>Pipelines Amelia</span>
+            <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+              {ameliaSegments.slice(0, 4).map(s => {
+                const meta = AMELIA_SEGMENT_META[s] ?? { label: s, bg: "rgba(0,0,0,0.05)", fg: "#475569" };
+                return (
+                  <a key={s} href={`/agent/databases/amelia?segment=${encodeURIComponent(s)}`} title={`Ver segmento '${meta.label}' en bases Amelia`} style={{ padding: "2px 7px", borderRadius: 5, fontSize: 10, fontWeight: 800, background: meta.bg, color: meta.fg, textDecoration: "none", whiteSpace: "nowrap", border: `1px solid ${meta.fg}22` }}>
+                    {meta.label}
+                  </a>
+                );
+              })}
+              {ameliaSegments.length > 4 && (
+                <span style={{ padding: "2px 7px", borderRadius: 5, fontSize: 10, fontWeight: 700, background: "rgba(0,0,0,0.05)", color: "#666" }}>+{ameliaSegments.length - 4}</span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Menú rápido: añadir a lista + asignar tarea */}
         <ChatExtrasMenu conversationId={conv.id} leadName={conv.lead_name} phone={conv.phone} />
