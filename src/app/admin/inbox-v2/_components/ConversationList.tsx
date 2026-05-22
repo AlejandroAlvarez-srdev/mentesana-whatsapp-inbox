@@ -51,6 +51,16 @@ export default function ConversationList({
   const [expiringOnly, setExpiringOnly] = useState(initialFilter === "expiring");
   const [expiredOnly, setExpiredOnly] = useState(initialFilter === "expired");
   const [mineOnly, setMineOnly] = useState(false);
+  // Si el agente tiene scope (ventas/soporte) ocultamos los pills Ventas/Soporte porque el
+  // backend YA fuerza el filtro automáticamente. Mostrarlos confunde y daba 0 resultados.
+  const [agentScope, setAgentScope] = useState<"ventas" | "soporte" | null>(null);
+  useEffect(() => {
+    if (apiBase !== "/api/agent/inbox") return;
+    fetch("/api/agent/whoami", { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.scope === "ventas" || d?.scope === "soporte") setAgentScope(d.scope); })
+      .catch(() => {});
+  }, [apiBase]);
   // Sincroniza con initialFilter cuando llega tarde (page.tsx lo lee del URL en useEffect,
   // así que en el primer render initialFilter llega null y luego cambia a 'expiring'/'unread'/'expired').
   // Sin este efecto, el useState(...) inicial sólo aplicaba en mount y los chips quedaban OFF.
@@ -276,9 +286,16 @@ export default function ConversationList({
           }}
         />
         <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <PipelinePill v="" cur={pipelineFilter} set={setPipelineFilter} label="Todas" />
-          <PipelinePill v="ventas" cur={pipelineFilter} set={setPipelineFilter} label="Ventas" />
-          <PipelinePill v="soporte" cur={pipelineFilter} set={setPipelineFilter} label="Soporte" />
+          {!agentScope && <>
+            <PipelinePill v="" cur={pipelineFilter} set={setPipelineFilter} label="Todas" />
+            <PipelinePill v="ventas" cur={pipelineFilter} set={setPipelineFilter} label="Ventas" />
+            <PipelinePill v="soporte" cur={pipelineFilter} set={setPipelineFilter} label="Soporte" />
+          </>}
+          {agentScope && (
+            <span style={{ padding: "3px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6, background: agentScope === "ventas" ? "rgba(106,23,140,0.1)" : "rgba(8,145,178,0.1)", color: agentScope === "ventas" ? "#6A178C" : "#0e7490" }}>
+              {agentScope === "ventas" ? "💼 Tu vista: Ventas" : "🛟 Tu vista: Soporte"}
+            </span>
+          )}
           {apiBase === "/api/agent/inbox" && (
             <button
               type="button"
