@@ -355,7 +355,31 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
     );
   }
   if (loading && !conv) return <div style={emptyStyle}><span style={{ color: "#aaa" }}>Cargando…</span></div>;
-  if (err && !conv) return <div style={emptyStyle}><span style={{ color: "#900" }}>Error: {err}</span></div>;
+  if (err && !conv) {
+    // 404 → vista "conversación no encontrada" amigable en lugar de error técnico.
+    const is404 = /\b404\b/.test(err);
+    return (
+      <div style={emptyStyle}>
+        <div style={{ textAlign: "center", color: "#475569", maxWidth: 360, padding: 24 }}>
+          <div style={{ fontSize: 48, marginBottom: 10 }}>{is404 ? "🔍" : "⚠️"}</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "#1a1a2e", marginBottom: 6 }}>
+            {is404 ? "Conversación no encontrada" : "Error al cargar"}
+          </div>
+          <div style={{ fontSize: 12.5, color: "#666", lineHeight: 1.55, marginBottom: 16 }}>
+            {is404 ? (
+              <>El ID de la conversación no existe (puede haberse borrado del CRM, o el contacto Amelia aún no tiene conversación abierta). Selecciona otra de la lista o vuelve atrás.</>
+            ) : (
+              <>{err}</>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+            <a href="/agent/conversations" style={{ padding: "8px 16px", background: "rgba(106,23,140,0.08)", color: "#6A178C", borderRadius: 8, textDecoration: "none", fontSize: 12.5, fontWeight: 800, border: "1px solid rgba(106,23,140,0.2)" }}>← Volver al inbox</a>
+            <a href="/agent/pipelines" style={{ padding: "8px 16px", background: "#6A178C", color: "#fff", borderRadius: 8, textDecoration: "none", fontSize: 12.5, fontWeight: 800 }}>📊 Pipelines</a>
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (!conv) return null;
 
   return (
