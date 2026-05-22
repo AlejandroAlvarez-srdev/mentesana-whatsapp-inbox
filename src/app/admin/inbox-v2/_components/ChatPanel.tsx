@@ -624,6 +624,31 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
           </div>
         )}
 
+        {/* Marcar como respondida — limpia unread_count sin que el agente tenga que responder */}
+        {(conv.unread_count ?? 0) > 0 && (
+          <button
+            type="button"
+            onClick={async () => {
+              if (!confirm("¿Marcar esta conversación como respondida? Limpia el contador de mensajes sin responder.")) return;
+              try {
+                const r = await fetch(`${apiBase}/conversations/${encodeURIComponent(conv.id)}/mark-read`, {
+                  method: "POST", credentials: "include",
+                });
+                if (r.ok) {
+                  setConv((c) => c ? ({ ...c, unread_count: 0 } as any) : c);
+                  onChanged?.();
+                } else {
+                  alert(`Error: ${r.status}`);
+                }
+              } catch (e: any) {
+                alert(`Error: ${String(e?.message ?? e)}`);
+              }
+            }}
+            title="Marcar como respondida (limpia unread sin enviar nada)"
+            style={{ padding: "5px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: "1px solid rgba(16,163,74,0.3)", background: "rgba(16,163,74,0.08)", color: "#065f46", cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}
+          >✓ Marcar respondida</button>
+        )}
+
         {/* Menú rápido: añadir a lista + asignar tarea */}
         <ChatExtrasMenu conversationId={conv.id} leadName={conv.lead_name} phone={conv.phone} />
 
@@ -915,12 +940,26 @@ function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia, onOpenPr
         }}
       />
       {/* Fila 1 — herramientas compactas (apiladas, ocupan menos) */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap", alignItems: "center", position: "relative" }}>
         <button
           onClick={() => fileInputRef.current?.click()}
           title="Adjuntar imagen, vídeo, audio o documento"
           style={{ padding: "6px 10px", borderRadius: 7, border: "1px solid rgba(0,0,0,0.1)", background: "#fff", cursor: "pointer", fontSize: 14 }}
         >📎</button>
+        <EmojiPickerButton onPick={(emoji) => {
+          const ta = inputRef.current;
+          if (!ta) { setText((t) => t + emoji); return; }
+          const start = ta.selectionStart ?? text.length;
+          const end = ta.selectionEnd ?? text.length;
+          const next = text.slice(0, start) + emoji + text.slice(end);
+          setText(next);
+          // Restaurar foco con cursor después del emoji insertado
+          setTimeout(() => {
+            ta.focus();
+            const pos = start + emoji.length;
+            ta.setSelectionRange(pos, pos);
+          }, 0);
+        }} />
         <button
           onClick={onOpenTemplates}
           title="Plantillas Meta · individual o bulk"
@@ -965,6 +1004,60 @@ function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia, onOpenPr
           {sending ? "Enviando…" : "Enviar →"}
         </button>
       </div>
+    </div>
+  );
+}
+
+// Picker simple de emojis — botón 😀 que abre un panel con los más comunes.
+// Categorías priorizadas para atención al cliente (saludo, agradecimiento, énfasis, etc).
+const EMOJIS_BY_CATEGORY: { label: string; emojis: string[] }[] = [
+  { label: "Caras", emojis: ["😀","😃","😄","😁","😊","🙂","😉","😍","🥰","😘","😎","🤗","🤔","😅","🙃","😇","🥹","🥲","😂","🤣","😢","😭","😔","😞","😟","😬","😴","🤯","😱","😡","🤬"] },
+  { label: "Gestos", emojis: ["👍","👎","👏","🙌","🙏","💪","✌️","🤝","👋","🫶","🫂","🤲","✊","👌","🤞","🤟","☝️","👇","👉","👈","🙆‍♀️","🤷‍♀️","🤦‍♀️","💁‍♀️"] },
+  { label: "Símbolos", emojis: ["❤️","💜","💙","💚","💛","🧡","🤍","🖤","💯","🔥","✨","⭐","🌟","💫","✅","❌","⚠️","🚨","💥","🎯","🎉","🎊","🎁","💎","🏆","🥇"] },
+  { label: "Trabajo", emojis: ["📋","📌","📎","✏️","📝","📅","📆","⏰","⏳","💼","📞","📱","💬","📧","📨","🔔","🔕","🔒","🔓","🔑","✉️","📤","📥","🗂️","📁","🗒️"] },
+  { label: "Salud", emojis: ["🧠","💆‍♀️","🧘‍♀️","💚","🫀","🌿","🌱","🌸","🌷","☀️","🌈","🦋","🕊️","☘️","💐","🌻"] },
+];
+function EmojiPickerButton({ onPick }: { onPick: (e: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  return (
+    <div ref={wrapperRef} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Insertar emoji"
+        style={{ padding: "6px 10px", borderRadius: 7, border: "1px solid rgba(0,0,0,0.1)", background: open ? "rgba(255,200,0,0.15)" : "#fff", cursor: "pointer", fontSize: 14 }}
+      >😀</button>
+      {open && (
+        <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: 0, background: "#fff", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 10, boxShadow: "0 12px 32px rgba(0,0,0,0.15)", padding: 10, width: 340, maxHeight: 320, overflowY: "auto", zIndex: 50 }}>
+          {EMOJIS_BY_CATEGORY.map((cat) => (
+            <div key={cat.label} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 9, fontWeight: 800, color: "#888", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{cat.label}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 2 }}>
+                {cat.emojis.map((e) => (
+                  <button
+                    key={e}
+                    onClick={() => { onPick(e); /* mantén abierto para insertar varios */ }}
+                    style={{ padding: "6px 0", fontSize: 22, background: "transparent", border: "none", cursor: "pointer", borderRadius: 5, lineHeight: 1 }}
+                    onMouseEnter={(ev) => ev.currentTarget.style.background = "rgba(106,23,140,0.08)"}
+                    onMouseLeave={(ev) => ev.currentTarget.style.background = "transparent"}
+                  >{e}</button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div style={{ fontSize: 10, color: "#aaa", textAlign: "center", paddingTop: 4, borderTop: "1px solid rgba(0,0,0,0.05)" }}>Esc para cerrar · click fuera también cierra</div>
+        </div>
+      )}
     </div>
   );
 }
