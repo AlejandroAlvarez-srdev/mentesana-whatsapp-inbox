@@ -793,41 +793,40 @@ function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia, onOpenPr
           </button>
         </div>
       )}
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*,video/*,audio/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-          style={{ display: "none" }}
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void handleAttach(f);
-            if (e.target) e.target.value = "";
-          }}
-        />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,video/*,audio/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void handleAttach(f);
+          if (e.target) e.target.value = "";
+        }}
+      />
+      {/* Fila 1 — herramientas compactas (apiladas, ocupan menos) */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap", alignItems: "center" }}>
         <button
           onClick={() => fileInputRef.current?.click()}
           title="Adjuntar imagen, vídeo, audio o documento"
-          style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.1)", background: "#fff", cursor: "pointer", fontSize: 16 }}
-        >
-          📎
-        </button>
+          style={{ padding: "6px 10px", borderRadius: 7, border: "1px solid rgba(0,0,0,0.1)", background: "#fff", cursor: "pointer", fontSize: 14 }}
+        >📎</button>
         <button
           onClick={onOpenTemplates}
           title="Plantillas Meta · individual o bulk"
-          style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${PURPLE}55`, background: `${PURPLE}0d`, color: PURPLE, cursor: "pointer", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}
-        >
-          📋 Plantillas
-        </button>
+          style={{ padding: "6px 10px", borderRadius: 7, border: `1px solid ${PURPLE}55`, background: `${PURPLE}0d`, color: PURPLE, cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}
+        >📋 Plantillas</button>
         {onOpenPropose && (
           <button
             onClick={onOpenPropose}
             title="Proponer huecos disponibles de la psicóloga"
-            style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${PURPLE}55`, background: `${PURPLE}0d`, color: PURPLE, cursor: "pointer", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}
-          >
-            📅 Proponer cita
-          </button>
+            style={{ padding: "6px 10px", borderRadius: 7, border: `1px solid ${PURPLE}55`, background: `${PURPLE}0d`, color: PURPLE, cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}
+          >📅 Proponer cita</button>
         )}
+        <span style={{ marginLeft: "auto", fontSize: 10, color: "#bbb" }}>WhatsApp Cloud API · '/' para respuestas rápidas · Cmd+Enter envía</span>
+      </div>
+      {/* Fila 2 — textarea grande + botón Enviar pegado a la derecha */}
+      <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
         <textarea
           ref={inputRef}
           value={text}
@@ -844,19 +843,18 @@ function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia, onOpenPr
               void handleSend();
             }
           }}
-          placeholder="Escribe el mensaje… (Cmd/Ctrl+Enter para enviar · '/' para respuestas rápidas)"
-          rows={2}
-          style={{ flex: 1, padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.1)", fontSize: 13, resize: "none", outline: "none", fontFamily: "inherit" }}
+          placeholder="Escribe el mensaje…"
+          rows={4}
+          style={{ flex: 1, padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.12)", fontSize: 14, resize: "vertical", outline: "none", fontFamily: "inherit", minHeight: 90, lineHeight: 1.5 }}
         />
         <button
           onClick={handleSend}
           disabled={sending || !text.trim()}
-          style={{ padding: "10px 20px", borderRadius: 8, border: "none", cursor: sending || !text.trim() ? "default" : "pointer", background: sending || !text.trim() ? "rgba(0,0,0,0.06)" : PURPLE, color: sending || !text.trim() ? "#888" : "#fff", fontSize: 13, fontWeight: 600 }}
+          style={{ padding: "10px 22px", borderRadius: 8, border: "none", cursor: sending || !text.trim() ? "default" : "pointer", background: sending || !text.trim() ? "rgba(0,0,0,0.06)" : PURPLE, color: sending || !text.trim() ? "#888" : "#fff", fontSize: 13, fontWeight: 700, minWidth: 100, alignSelf: "flex-end", height: 44 }}
         >
-          {sending ? "Enviando…" : "Enviar"}
+          {sending ? "Enviando…" : "Enviar →"}
         </button>
       </div>
-      <div style={{ marginTop: 4, fontSize: 10, color: "#bbb" }}>WhatsApp Cloud API · inbox-v2-server v7</div>
     </div>
   );
 }
