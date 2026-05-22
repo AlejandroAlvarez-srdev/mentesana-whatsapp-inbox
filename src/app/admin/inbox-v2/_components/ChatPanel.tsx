@@ -638,6 +638,11 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
                 if (r.ok) {
                   setConv((c) => c ? ({ ...c, unread_count: 0 } as any) : c);
                   onChanged?.();
+                  // Notifica a ConversationList que la conv cambió → refresca lista al instante
+                  // (sin esperar al silent refresh de 6s).
+                  if (typeof window !== "undefined") {
+                    window.dispatchEvent(new CustomEvent("inbox:conversation-updated", { detail: { id: conv.id, unread_count: 0 } }));
+                  }
                 } else {
                   alert(`Error: ${r.status}`);
                 }

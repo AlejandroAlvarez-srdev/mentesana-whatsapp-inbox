@@ -252,6 +252,26 @@ export default function ConversationList({
     },
   });
 
+  // Evento global desde otros componentes (ChatPanel) cuando cambian una conv —
+  // ej. al pulsar "Marcar respondida", refresca la lista inmediatamente para que
+  // el badge se quite sin esperar al silent refresh (6s).
+  useEffect(() => {
+    if (mode === "search") return;
+    const onUpdated = (e: Event) => {
+      const ev = e as CustomEvent<{ id?: string; unread_count?: number }>;
+      // Optimistic: actualiza el item en local sin esperar fetch
+      if (ev.detail?.id) {
+        setItems((prev) => prev.map((c) => c.id === ev.detail.id ? { ...c, unread_count: ev.detail.unread_count ?? c.unread_count } : c));
+      }
+      // Y luego refresca del servidor para garantizar consistencia
+      if (realtimeDebounceRef.current) window.clearTimeout(realtimeDebounceRef.current);
+      realtimeDebounceRef.current = window.setTimeout(() => { void silentRefresh(); }, 200);
+    };
+    window.addEventListener("inbox:conversation-updated", onUpdated as EventListener);
+    return () => window.removeEventListener("inbox:conversation-updated", onUpdated as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
   return (
     <div
       style={{
