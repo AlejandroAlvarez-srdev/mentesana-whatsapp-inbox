@@ -44,6 +44,7 @@ type Conversation = {
   source: string | null;
   notes: string | null;
   created_at: string;
+  unread_count?: number | null;
 };
 
 type Agent = { id: string; name: string; email: string; agent_type: string | null };
