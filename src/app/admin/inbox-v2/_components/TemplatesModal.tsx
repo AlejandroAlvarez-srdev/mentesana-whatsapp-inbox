@@ -312,6 +312,35 @@ export default function TemplatesModal({
     setSending(true);
     setBulkResult(null);
     try {
+      // PRE-FLIGHT: ensure-conversation por cada phone que no tenga conv en CRM.
+      // El Edge Function broadcast/template envía la plantilla a Meta pero SOLO guarda
+      // el mensaje en messages_mentesana si la conv ya existe — si no existe, el msg
+      // se entrega al cliente pero desaparece del CRM. Pre-creando las conv aquí,
+      // el Edge Function las encuentra y registra todo correctamente.
+      const phonesToEnsure: string[] = personalize
+        ? buildRecipientsForBulk().map((r) => r.phone)
+        : parsedPhones;
+      // En paralelo con concurrencia limitada (10) para no saturar Supabase.
+      const ensureBatch = async (phones: string[]) => {
+        const CONCURRENCY = 10;
+        let i = 0;
+        async function worker() {
+          while (i < phones.length) {
+            const phone = phones[i++];
+            try {
+              await fetch("/api/agent/ensure-conversation", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ phone }),
+              });
+            } catch { /* best-effort: si falla, el bulk simplemente no guardará msg en CRM pero sí en Meta */ }
+          }
+        }
+        await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+      };
+      await ensureBatch(phonesToEnsure);
+
       const reqBody: any = { template_name: selected.name, language: selected.language, from_number: fromNumberId, agent_name: "agente" };
       if (personalize) {
         reqBody.recipients = buildRecipientsForBulk();
