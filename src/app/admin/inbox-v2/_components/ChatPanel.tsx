@@ -75,6 +75,23 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   const [savingSale, setSavingSale] = useState(false);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [proposeOpen, setProposeOpen] = useState(false);
+  // Cache name → body extraído de meta-templates. El backend solo guarda content="[Template X]"
+  // como placeholder, así que aquí resolvemos el cuerpo real para mostrarlo en el chat.
+  const [templateBodies, setTemplateBodies] = useState<Record<string, string>>({});
+  useEffect(() => {
+    fetch(`${apiBase}/meta-templates`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d?.templates) return;
+        const map: Record<string, string> = {};
+        for (const t of d.templates) {
+          const body = (t.components ?? []).find((c: any) => c.type === "BODY")?.text;
+          if (body) map[t.name] = body;
+        }
+        setTemplateBodies(map);
+      })
+      .catch(() => {});
+  }, [apiBase]);
 
   const loadFull = useCallback(async () => {
     if (!conversationId) return;
@@ -950,9 +967,17 @@ function Bubble({ m, apiBase }: { m: Message; apiBase: string }) {
         )}
         {/* Mostrar content solo si NO es un placeholder de media ([image] / [video] / [audio] / [sticker] / [document] / "📎 ...") */}
         {(() => {
-          const content = m.content?.trim() ?? "";
+          let content = m.content?.trim() ?? "";
           const isPlaceholder = /^(\[image\]|\[video\]|\[audio\]|\[sticker\]|\[document\]|📎\s)/i.test(content);
           if (mediaSrc && isPlaceholder) return null; // media ya renderizado, no duplicar texto
+          // Plantillas: el backend guarda content="[Template <name>]" como placeholder.
+          // Resolvemos el body real desde el cache local de meta-templates.
+          const tplPlaceholderMatch = content.match(/^\[Template\s+([\w\-]+)\]$/i);
+          if (m.is_template && (tplPlaceholderMatch || !content) && m.template_name) {
+            const body = templateBodies[m.template_name];
+            if (body) content = body;
+            else if (tplPlaceholderMatch) content = `📋 ${m.template_name}\n(cuerpo de la plantilla cargando…)`;
+          }
           if (!content && !mediaSrc) return <div style={{ fontSize: 13.5, color: textColor, opacity: 0.5 }}>—</div>;
           return content ? <div style={{ fontSize: 13.5, lineHeight: 1.45, color: textColor, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{content}</div> : null;
         })()}
