@@ -209,7 +209,7 @@ export default function InsightsPanel({
 
       {/* Tabs */}
       <div style={{ display: "flex", padding: 8, gap: 4, borderBottom: "1px solid rgba(0,0,0,0.06)", flexShrink: 0 }}>
-        <TabBtn cur={tab} v="pipeline" set={setTab} label="🎯 Pipeline" />
+        <TabBtn cur={tab} v="pipeline" set={setTab} label="📋 Plan de trabajo" />
         <TabBtn cur={tab} v="insights" set={setTab} label="🧠 Insights" />
         <TabBtn cur={tab} v="perfil" set={setTab} label="👤 Perfil" />
         <TabBtn cur={tab} v="amelia" set={setTab} label="🛠️ Amelia" />
