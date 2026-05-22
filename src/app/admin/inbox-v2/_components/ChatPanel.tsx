@@ -383,7 +383,9 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, agent_name: "agente" }),
+      // No hardcodeamos agent_name — el proxy server-side lo inyecta con el nombre real del
+      // agente loggeado (antes 'agente' por defecto hacía que TODOS los mensajes salieran como 'Agente').
+      body: JSON.stringify({ text }),
     });
     if (r.ok) {
       // El mensaje aparece via realtime; loadFull tras 1.5s pesca el status='failed' si Meta lo rechazo despues

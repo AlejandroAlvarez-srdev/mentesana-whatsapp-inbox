@@ -233,7 +233,7 @@ export default function TemplatesModal({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ template_name: selected.name, language: selected.language, from_number: fromNumberId, components: buildComponents(), agent_name: "agente" }),
+        body: JSON.stringify({ template_name: selected.name, language: selected.language, from_number: fromNumberId, components: buildComponents() }),
       });
       const j = await r.json().catch(() => ({}));
       if (r.ok) {
@@ -341,7 +341,7 @@ export default function TemplatesModal({
       };
       await ensureBatch(phonesToEnsure);
 
-      const reqBody: any = { template_name: selected.name, language: selected.language, from_number: fromNumberId, agent_name: "agente" };
+      const reqBody: any = { template_name: selected.name, language: selected.language, from_number: fromNumberId };
       if (personalize) {
         reqBody.recipients = buildRecipientsForBulk();
       } else {
