@@ -116,15 +116,17 @@ export default function ConversationList({
       const offset = append ? items.length : 0;
       const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
       if (q.trim()) params.set("search", q.trim());
-      if (pipelineFilter) params.set("pipeline", pipelineFilter);
+      if (pipelineFilter) params.set("client_type", pipelineFilter); // FIX: client_type, no pipeline
       if (numberFilter) params.set("phone_number_id", numberFilter);
       if (unreadOnly) params.set("unread", "true");
       if (expiringOnly) params.set("window_status", "expiring_soon");
       if (expiredOnly) params.set("window_status", "expired");
-      // "Mías" usa un endpoint paralelo que va directo a Supabase con filtro assigned_to=<agent.id>
-      // (el Edge Function no soporta ese filtro). Solo aplica si estamos en el inbox de agente.
-      const useMineEndpoint = mineOnly && apiBase === "/api/agent/inbox";
-      const endpoint = useMineEndpoint ? `/api/agent/inbox/mine?${params}` : `${apiBase}/conversations?${params}`;
+      if (mineOnly) params.set("mine", "true");
+      // Usamos endpoint propio /api/agent/inbox-list para filtros que el Edge Function no soporta
+      // (window_status, mine). Para el listado normal seguimos en el proxy si es /agent (más rápido,
+      // tiene caches), pero si es admin/inbox-v2 también. Solo redirigimos cuando hace falta.
+      const needsCustom = (expiringOnly || expiredOnly || mineOnly) && apiBase === "/api/agent/inbox";
+      const endpoint = needsCustom ? `/api/agent/inbox-list?${params}` : `${apiBase}/conversations?${params}`;
       const r = await fetch(endpoint, { credentials: "include", signal: ac.signal });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
@@ -186,13 +188,14 @@ export default function ConversationList({
       const lim = Math.max(PAGE_SIZE, items.length);
       const params = new URLSearchParams({ limit: String(lim), offset: "0" });
       if (query.trim() && !query.startsWith("?")) params.set("search", query.trim());
-      if (pipelineFilter) params.set("pipeline", pipelineFilter);
+      if (pipelineFilter) params.set("client_type", pipelineFilter);
       if (numberFilter) params.set("phone_number_id", numberFilter);
       if (unreadOnly) params.set("unread", "true");
       if (expiringOnly) params.set("window_status", "expiring_soon");
       if (expiredOnly) params.set("window_status", "expired");
-      const useMineEndpoint = mineOnly && apiBase === "/api/agent/inbox";
-      const endpoint = useMineEndpoint ? `/api/agent/inbox/mine?${params}` : `${apiBase}/conversations?${params}`;
+      if (mineOnly) params.set("mine", "true");
+      const needsCustom = (expiringOnly || expiredOnly || mineOnly) && apiBase === "/api/agent/inbox";
+      const endpoint = needsCustom ? `/api/agent/inbox-list?${params}` : `${apiBase}/conversations?${params}`;
       const r = await fetch(endpoint, { credentials: "include", signal: ac.signal });
       if (!r.ok) return;
       const d = await r.json();
