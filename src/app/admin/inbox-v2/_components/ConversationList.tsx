@@ -50,6 +50,7 @@ export default function ConversationList({
   const [unreadOnly, setUnreadOnly] = useState(initialFilter === "unread");
   const [expiringOnly, setExpiringOnly] = useState(initialFilter === "expiring");
   const [expiredOnly, setExpiredOnly] = useState(initialFilter === "expired");
+  const [mineOnly, setMineOnly] = useState(false);
   // Sincroniza con initialFilter cuando llega tarde (page.tsx lo lee del URL en useEffect,
   // así que en el primer render initialFilter llega null y luego cambia a 'expiring'/'unread'/'expired').
   // Sin este efecto, el useState(...) inicial sólo aplicaba en mount y los chips quedaban OFF.
@@ -120,7 +121,11 @@ export default function ConversationList({
       if (unreadOnly) params.set("unread", "true");
       if (expiringOnly) params.set("window_status", "expiring_soon");
       if (expiredOnly) params.set("window_status", "expired");
-      const r = await fetch(`${apiBase}/conversations?${params}`, { credentials: "include", signal: ac.signal });
+      // "Mías" usa un endpoint paralelo que va directo a Supabase con filtro assigned_to=<agent.id>
+      // (el Edge Function no soporta ese filtro). Solo aplica si estamos en el inbox de agente.
+      const useMineEndpoint = mineOnly && apiBase === "/api/agent/inbox";
+      const endpoint = useMineEndpoint ? `/api/agent/inbox/mine?${params}` : `${apiBase}/conversations?${params}`;
+      const r = await fetch(endpoint, { credentials: "include", signal: ac.signal });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       if (reqIdRef.current !== myReqId) return;
@@ -146,7 +151,7 @@ export default function ConversationList({
     debounceRef.current = window.setTimeout(() => { void loadList(query); }, 250);
     return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, pipelineFilter, numberFilter, unreadOnly, expiringOnly, expiredOnly]);
+  }, [query, pipelineFilter, numberFilter, unreadOnly, expiringOnly, expiredOnly, mineOnly]);
 
   // Infinite scroll: cuando el sentinel entra en viewport, carga la siguiente página
   useEffect(() => {
@@ -186,7 +191,9 @@ export default function ConversationList({
       if (unreadOnly) params.set("unread", "true");
       if (expiringOnly) params.set("window_status", "expiring_soon");
       if (expiredOnly) params.set("window_status", "expired");
-      const r = await fetch(`${apiBase}/conversations?${params}`, { credentials: "include", signal: ac.signal });
+      const useMineEndpoint = mineOnly && apiBase === "/api/agent/inbox";
+      const endpoint = useMineEndpoint ? `/api/agent/inbox/mine?${params}` : `${apiBase}/conversations?${params}`;
+      const r = await fetch(endpoint, { credentials: "include", signal: ac.signal });
       if (!r.ok) return;
       const d = await r.json();
       const fresh: ConvSummary[] = d.conversations ?? [];
@@ -216,7 +223,7 @@ export default function ConversationList({
     document.addEventListener("visibilitychange", onVis);
     return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, pipelineFilter, numberFilter, unreadOnly, expiringOnly, expiredOnly, mode, items.length]);
+  }, [query, pipelineFilter, numberFilter, unreadOnly, expiringOnly, expiredOnly, mineOnly, mode, items.length]);
 
   // Realtime: cuando una conversación cambia (nuevo mensaje del lead, status,
   // unread_count, asignación), refrescamos la lista actual sin recargar todo
@@ -269,6 +276,20 @@ export default function ConversationList({
           <PipelinePill v="" cur={pipelineFilter} set={setPipelineFilter} label="Todas" />
           <PipelinePill v="ventas" cur={pipelineFilter} set={setPipelineFilter} label="Ventas" />
           <PipelinePill v="soporte" cur={pipelineFilter} set={setPipelineFilter} label="Soporte" />
+          {apiBase === "/api/agent/inbox" && (
+            <button
+              type="button"
+              onClick={() => setMineOnly((v) => !v)}
+              style={{
+                padding: "3px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: "none", cursor: "pointer",
+                background: mineOnly ? PURPLE : "rgba(106,23,140,0.1)",
+                color: mineOnly ? "#fff" : "#6A178C",
+              }}
+              title="Solo conversaciones asignadas a mí"
+            >
+              👤 Mías
+            </button>
+          )}
           <button
             type="button"
             onClick={() => { setUnreadOnly((v) => !v); setExpiringOnly(false); setExpiredOnly(false); }}
