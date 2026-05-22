@@ -650,7 +650,7 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
           </div>
         )}
         {messages.length === 0 && <div style={{ textAlign: "center", color: "#aaa", fontSize: 12, padding: 30 }}>Sin mensajes.</div>}
-        {messages.map((m) => <Bubble key={m.id} m={m} apiBase={apiBase} />)}
+        {messages.map((m) => <Bubble key={m.id} m={m} apiBase={apiBase} templateBodies={templateBodies} />)}
       </div>
 
       {/* Compose */}
@@ -926,7 +926,7 @@ function resolveMediaUrl(rawUrl: string | null, apiBase: string): string | null 
   return rawUrl;
 }
 
-function Bubble({ m, apiBase }: { m: Message; apiBase: string }) {
+function Bubble({ m, apiBase, templateBodies }: { m: Message; apiBase: string; templateBodies: Record<string, string> }) {
   const isLead = m.is_lead;
   const isFailed = m.status === "failed" || m.status === "error";
   const align = isLead ? "flex-start" : "flex-end";
