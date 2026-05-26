@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import TemplatesModal from "./TemplatesModal";
 import ProposeAppointmentModal from "./ProposeAppointmentModal";
 import ChatExtrasMenu from "./ChatExtrasMenu";
@@ -89,6 +89,16 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   const lastMsgTsRef = useRef<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  // Refs para gobernar el scroll del chat con orden lógico:
+  // - isAtBottomRef: ¿el usuario está pegado al fondo? actualizado en onScroll
+  // - firstMessageIdRef / lastMessageIdRef: detectar prepend (load older) vs append (msg nuevo)
+  // - prependPreserveRef: snapshot (scrollHeight, scrollTop) ANTES del setMessages al prepend
+  // - initialScrollDoneRef: primer render de la conv hace 1 sola vez scroll al fondo
+  const isAtBottomRef = useRef(true);
+  const firstMessageIdRef = useRef<string | null>(null);
+  const lastMessageIdRef = useRef<string | null>(null);
+  const prependPreserveRef = useRef<{ height: number; top: number } | null>(null);
+  const initialScrollDoneRef = useRef(false);
   const [savingSale, setSavingSale] = useState(false);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [proposeOpen, setProposeOpen] = useState(false);
@@ -138,7 +148,11 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
     setMessages([]);
     setAmeliaSegments([]);
     lastMsgTsRef.current = null;
-    lastScrollHeightRef.current = 0; // reset → fuerza scroll al fondo al cargar la nueva conv
+    // reset scroll-anchor refs → primer render de la nueva conv hace scroll al fondo
+    isAtBottomRef.current = true;
+    firstMessageIdRef.current = null;
+    lastMessageIdRef.current = null;
+    initialScrollDoneRef.current = false;
     setHasMoreOlder(true);
     void loadFull();
   }, [conversationId, loadFull]);
@@ -296,26 +310,25 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
     if (!conversationId || loadingOlder || !hasMoreOlder || messages.length === 0) return;
     const before = messages[0].timestamp;
     const el = scrollRef.current;
-    const prevHeight = el?.scrollHeight ?? 0;
-    const prevTop = el?.scrollTop ?? 0;
+    // Snapshot ANTES del setMessages → useLayoutEffect lo usa para preservar la posición visual exacta
+    if (el) prependPreserveRef.current = { height: el.scrollHeight, top: el.scrollTop };
     setLoadingOlder(true);
     try {
       const r = await fetch(`${olderEndpoint}?conv=${encodeURIComponent(conversationId)}&before=${encodeURIComponent(before)}&limit=80`, { credentials: "include" });
       if (!r.ok) return;
       const d = await r.json();
       const older: Message[] = d.messages ?? [];
-      if (older.length === 0) { setHasMoreOlder(false); return; }
+      if (older.length === 0) {
+        setHasMoreOlder(false);
+        prependPreserveRef.current = null; // nada que preservar, no se prepended
+        return;
+      }
       setMessages((prev) => {
         const existing = new Set(prev.map((m) => m.id));
         const fresh = older.filter((m) => !existing.has(m.id));
         return [...fresh, ...prev];
       });
       setHasMoreOlder(d.has_more === true);
-      // Preservar posición de scroll: tras el re-render, scrollTop = nuevaAltura - oldHeight + oldTop
-      requestAnimationFrame(() => {
-        if (!el) return;
-        el.scrollTop = el.scrollHeight - prevHeight + prevTop;
-      });
     } finally {
       setLoadingOlder(false);
     }
@@ -347,18 +360,54 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
     }
   }
 
-  // Auto-scroll al fondo del chat — SOLO si el usuario ya estaba cerca del fondo (no rompe lectura).
-  const lastScrollHeightRef = useRef(0);
-  useEffect(() => {
+  // Scroll governance — corre ANTES del paint para evitar flashes/saltos visibles.
+  //
+  // Reglas:
+  //   1. Primer render con mensajes de una conv nueva → scroll instantáneo al fondo.
+  //   2. PREPEND (load older puso mensajes al principio) → preserva posición visual
+  //      exacta usando snapshot capturado en loadOlderMessages.
+  //   3. APPEND (mensaje nuevo al final, por realtime/polling/envío propio) →
+  //      auto-scroll suave al fondo SOLO si el usuario ya estaba cerca del fondo.
+  //      Si está leyendo arriba, no se mueve nada.
+  useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    // Si estaba cerca del fondo (<120px) o es la carga inicial, hace scroll al fondo
-    if (distanceFromBottom < 120 || lastScrollHeightRef.current === 0) {
-      el.scrollTop = el.scrollHeight;
+    if (!el || messages.length === 0) {
+      firstMessageIdRef.current = null;
+      lastMessageIdRef.current = null;
+      return;
     }
-    lastScrollHeightRef.current = el.scrollHeight;
-  }, [messages.length]);
+
+    const newFirstId = messages[0].id;
+    const newLastId = messages[messages.length - 1].id;
+    const prevFirstId = firstMessageIdRef.current;
+    const prevLastId = lastMessageIdRef.current;
+
+    // Caso 1: carga inicial de la conversación
+    if (!initialScrollDoneRef.current) {
+      el.scrollTop = el.scrollHeight;
+      initialScrollDoneRef.current = true;
+      isAtBottomRef.current = true;
+    }
+    // Caso 2: PREPEND (load older) — usar snapshot, preservar posición visual
+    else if (prependPreserveRef.current && prevFirstId !== null && newFirstId !== prevFirstId) {
+      const snap = prependPreserveRef.current;
+      const heightGrew = el.scrollHeight - snap.height;
+      el.scrollTop = snap.top + heightGrew;
+      // No actualizamos isAtBottomRef — el prepend no afecta el "estoy abajo"
+    }
+    // Caso 3: APPEND (mensaje nuevo al final)
+    else if (prevLastId !== null && newLastId !== prevLastId) {
+      if (isAtBottomRef.current) {
+        // El usuario estaba pegado al fondo → seguir pegado, con smooth si soporta
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      }
+      // Si NO está al fondo, no movemos nada — está leyendo arriba.
+    }
+
+    firstMessageIdRef.current = newFirstId;
+    lastMessageIdRef.current = newLastId;
+    prependPreserveRef.current = null;
+  }, [messages]);
 
   async function patchConv(patch: Partial<Conversation>) {
     if (!conversationId) return;
@@ -720,12 +769,18 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
       <div
         ref={scrollRef}
         onScroll={(e) => {
-          // Si el usuario se acerca al top (<60px) y aún quedan mensajes viejos → cargar más
-          if (e.currentTarget.scrollTop < 60 && hasMoreOlder && !loadingOlder && messages.length > 0) {
+          const t = e.currentTarget;
+          // Actualizar el flag "estoy al fondo" — alimenta la lógica del auto-scroll
+          // del useLayoutEffect: si está al fondo, los mensajes nuevos hacen scroll
+          // suave; si no, se quedan donde el usuario está leyendo.
+          const distFromBottom = t.scrollHeight - t.scrollTop - t.clientHeight;
+          isAtBottomRef.current = distFromBottom < 80;
+          // Cargar más mensajes viejos al acercarse al top
+          if (t.scrollTop < 80 && hasMoreOlder && !loadingOlder && messages.length > 0) {
             void loadOlderMessages();
           }
         }}
-        style={{ flex: 1, overflowY: "auto", padding: "16px 14px", background: "#FAFAFA" }}
+        style={{ flex: 1, overflowY: "auto", padding: "16px 14px", background: "#FAFAFA", overflowAnchor: "none", scrollBehavior: "auto" }}
       >
         {hasMoreOlder && messages.length > 0 && (
           <div style={{ textAlign: "center", padding: "6px 0", fontSize: 11, color: "#888" }}>
