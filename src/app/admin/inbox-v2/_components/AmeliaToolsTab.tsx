@@ -21,6 +21,26 @@ function fmtMadrid(iso: string) {
   return new Intl.DateTimeFormat("es-ES", { timeZone: "Europe/Madrid", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso));
 }
 
+// Semántica Mente Sana sobre customer_bookings.status (reference_amelia_attendance.md).
+// isPast=true → cita ya pasó; isPast=false → cita futura.
+function statusBadgeAmelia(status: string, isPast: boolean): { label: string; bg: string; fg: string } {
+  const s = (status || "").toLowerCase();
+  if (s === "approved") {
+    return isPast
+      ? { label: "✓ Asistió", bg: "rgba(16,185,129,0.14)", fg: "#065f46" }
+      : { label: "📅 Confirmada", bg: "rgba(8,145,178,0.14)", fg: "#075985" };
+  }
+  if (s === "pending") {
+    return isPast
+      ? { label: "✓ Asistió", bg: "rgba(16,185,129,0.14)", fg: "#065f46" }
+      : { label: "📅 Reservada", bg: "rgba(8,145,178,0.14)", fg: "#075985" };
+  }
+  if (s === "no-show") return { label: "👻 No asistió", bg: "rgba(239,68,68,0.14)", fg: "#991b1b" };
+  if (s === "rejected") return { label: "👻 No asistió", bg: "rgba(239,68,68,0.14)", fg: "#991b1b" };
+  if (s === "canceled" || s === "cancelled") return { label: "🚫 Cancelada", bg: "rgba(148,163,184,0.18)", fg: "#475569" };
+  return { label: s.toUpperCase() || "—", bg: "rgba(0,0,0,0.05)", fg: "#666" };
+}
+
 type Provider = { id: number; name: string; email: string | null };
 
 export default function AmeliaToolsTab({ phone, email, conversationId }: { phone: string | null; email: string | null; conversationId: string | null }) {
@@ -144,15 +164,18 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
       {data.past.length > 0 && (
         <Section title={`🕒 Últimas 5 sesiones`}>
           <div style={{ display: "grid", gap: 4 }}>
-            {data.past.map((a) => (
-              <div key={a.appointment_id} style={{ padding: "7px 9px", background: "#fff", borderRadius: 8, border: "1px solid rgba(0,0,0,0.05)", fontSize: 11.5 }}>
-                <span style={{ color: "#888", fontFamily: "ui-monospace, monospace" }}>{fmtMadrid(a.booking_start_utc)}</span>
-                {a.provider_name && <span style={{ marginLeft: 6, color: "#666" }}>· {a.provider_name}</span>}
-                <span style={{ marginLeft: 6, fontSize: 9, padding: "1px 5px", borderRadius: 4, background: a.booking_status === "approved" ? "rgba(16,185,129,0.14)" : a.booking_status === "canceled" ? "rgba(239,68,68,0.14)" : "rgba(0,0,0,0.05)", color: a.booking_status === "approved" ? "#065f46" : a.booking_status === "canceled" ? "#991b1b" : "#666", fontWeight: 700, textTransform: "uppercase" }}>
-                  {a.booking_status}
-                </span>
-              </div>
-            ))}
+            {data.past.map((a) => {
+              const b = statusBadgeAmelia(a.booking_status, true);
+              return (
+                <div key={a.appointment_id} style={{ padding: "7px 9px", background: "#fff", borderRadius: 8, border: "1px solid rgba(0,0,0,0.05)", fontSize: 11.5 }}>
+                  <span style={{ color: "#888", fontFamily: "ui-monospace, monospace" }}>{fmtMadrid(a.booking_start_utc)}</span>
+                  {a.provider_name && <span style={{ marginLeft: 6, color: "#666" }}>· {a.provider_name}</span>}
+                  <span title={`Status crudo: ${a.booking_status}`} style={{ marginLeft: 6, fontSize: 9, padding: "1px 6px", borderRadius: 4, background: b.bg, color: b.fg, fontWeight: 800 }}>
+                    {b.label}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </Section>
       )}
