@@ -1,4 +1,4 @@
-// inbox-v2-server v17 — persiste sendText/sendTemplate fallidos con status='failed' + error_reason (motivo literal Meta visible en chat)
+// inbox-v2-server v18 — routing MM Lite: templates MARKETING → /marketing_messages, resto → /messages
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 
 function cleanKey(v: string | undefined): string | undefined { if (!v) return v; return v.replace(/[^\x20-\x7E]/g, '').trim(); }
@@ -332,12 +332,45 @@ async function metaSendText(num: WaNumber, toPhone: string, text: string): Promi
   const j = await res.json();
   return { wamid: j.messages?.[0]?.id ?? '' };
 }
+// Caché en memoria de categoría por template (name+lang). Se llena con el primer fetch
+// al WABA y se reutiliza durante la vida de la función (Deno edge — proceso reutilizable).
+// TTL implícito: vive lo que vive el proceso. Se refresca cuando el cache se queda corto.
+const TEMPLATE_CATEGORY_CACHE: Map<string, string> = new Map();
+function tplCacheKey(wabaId: string, name: string, lang: string) { return `${wabaId}:${name}:${lang}`; }
+
+async function fetchTemplateCategory(num: WaNumber, name: string, lang: string): Promise<string | null> {
+  const wabaId = num.business_account_id;
+  if (!wabaId) return null;
+  const key = tplCacheKey(wabaId, name, lang);
+  const cached = TEMPLATE_CATEGORY_CACHE.get(key);
+  if (cached) return cached;
+  // Pull todas y rellenar caché en bulk (más eficiente que pedir 1 a 1)
+  try {
+    const params = new URLSearchParams({ fields: 'name,language,status,category', limit: '200' });
+    const r = await fetch(`${WHATSAPP_API}/${wabaId}/message_templates?${params}`, { headers: { 'Authorization': `Bearer ${num.access_token}` } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    for (const t of (j.data ?? [])) {
+      TEMPLATE_CATEGORY_CACHE.set(tplCacheKey(wabaId, t.name, t.language), t.category);
+    }
+    return TEMPLATE_CATEGORY_CACHE.get(key) ?? null;
+  } catch { return null; }
+}
+
 async function metaSendTemplate(num: WaNumber, toPhone: string, templateName: string, lang: string, components: any[]): Promise<{ wamid: string }> {
-  const url = `${WHATSAPP_API}/${num.phone_number_id}/messages`;
+  // ROUTING MM Lite: si el template es categoría MARKETING, enviamos por
+  // /{phone-id}/marketing_messages (endpoint MM Lite). Cualquier otra categoría
+  // (UTILITY, AUTHENTICATION) usa el endpoint clásico /messages.
+  // El número debe estar onboardeado a MM Lite (caso Soporte REDACTED_ID
+  // y Ventas REDACTED_ID — ambos en WABA REDACTED_ID).
+  const category = await fetchTemplateCategory(num, templateName, lang);
+  const isMarketing = (category ?? '').toUpperCase() === 'MARKETING';
+  const path = isMarketing ? 'marketing_messages' : 'messages';
+  const url = `${WHATSAPP_API}/${num.phone_number_id}/${path}`;
   const body: any = { messaging_product: 'whatsapp', to: toPhone, type: 'template', template: { name: templateName, language: { code: lang } } };
   if (components && components.length > 0) body.template.components = components;
   const res = await fetch(url, { method: 'POST', headers: { 'Authorization': `Bearer ${num.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  if (!res.ok) throw new Error(`Meta ${res.status}: ${(await res.text()).slice(0, 500)}`);
+  if (!res.ok) throw new Error(`Meta ${res.status} (${isMarketing ? 'MM_LITE' : 'CLOUD'}): ${(await res.text()).slice(0, 500)}`);
   const j = await res.json();
   return { wamid: j.messages?.[0]?.id ?? '' };
 }
