@@ -680,7 +680,7 @@ Deno.serve(async (req: Request) => {
   const method = req.method;
   if (method === 'OPTIONS') return new Response(null, { headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS', 'access-control-allow-headers': 'authorization, content-type, x-inbox-secret' } });
   try {
-    if (method === 'GET' && path === '/') { const nums = await loadWaNumbers().catch(() => []); return json({ ok: true, service: 'inbox-v2-server', version: 'v16', wa_numbers: nums.length, wa_default: nums.find((n) => n.is_default)?.name ?? null, models: { fast: MODEL_FAST, rich: MODEL_RICH, embed: EMBED_MODEL } }); }
+    if (method === 'GET' && path === '/') { const nums = await loadWaNumbers().catch(() => []); return json({ ok: true, service: 'inbox-v2-server', version: 'v18', mm_lite_routing: true, wa_numbers: nums.length, wa_default: nums.find((n) => n.is_default)?.name ?? null, models: { fast: MODEL_FAST, rich: MODEL_RICH, embed: EMBED_MODEL } }); }
     const auth = checkSecret(req); if (auth) return auth;
     if (method === 'GET' && path === '/brain') return await brain(url);
     if (method === 'GET' && path === '/agents') return await listAgents();
