@@ -14,16 +14,34 @@ type Family = {
   stats: { total: number; assigned: number; unassigned: number; phases: Record<string, number> };
 };
 
+type TaskCounts = { open: number; in_progress: number; done: number; from_ceo_open: number; total: number };
+
 export default function PipelinesIndex() {
   const [families, setFamilies] = useState<Family[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [taskCounts, setTaskCounts] = useState<TaskCounts | null>(null);
 
   useEffect(() => {
     fetch("/api/admin/inbox-v2/pipelines/families")
       .then((r) => r.json())
       .then((j) => { setFamilies(j.families ?? []); setLoading(false); })
       .catch((e) => { setErr(String(e)); setLoading(false); });
+
+    fetch("/api/agent/my-tasks", { credentials: "include" })
+      .then((r) => r.json())
+      .then((j) => {
+        const tasks = (j.tasks ?? []) as Array<{ status: string; from_ceo?: boolean }>;
+        const c: TaskCounts = { open: 0, in_progress: 0, done: 0, from_ceo_open: 0, total: tasks.length };
+        for (const t of tasks) {
+          if (t.status === "open") c.open += 1;
+          else if (t.status === "in_progress") c.in_progress += 1;
+          else if (t.status === "done") c.done += 1;
+          if (t.from_ceo && t.status !== "done" && t.status !== "cancelled") c.from_ceo_open += 1;
+        }
+        setTaskCounts(c);
+      })
+      .catch(() => { /* sin tareas o sin sesión, no rompe el índice */ });
   }, []);
 
   return (
@@ -38,6 +56,49 @@ export default function PipelinesIndex() {
 
       {err && <div style={{ padding: 12, background: "#fef2f2", color: "#991b1b", borderRadius: 8 }}>{err}</div>}
       {loading && <div style={{ color: "#94a3b8" }}>Cargando…</div>}
+
+      {/* Tile destacado: tareas asignadas (CEO + cualquier panel) */}
+      {taskCounts && taskCounts.total > 0 && (
+        <Link
+          href="/admin/inbox-v2/pipelines/tasks"
+          style={{
+            display: "block",
+            padding: 18,
+            background: taskCounts.from_ceo_open > 0
+              ? "linear-gradient(135deg, #6A178C, #8B2FB5)"
+              : "linear-gradient(135deg, #1e293b, #334155)",
+            borderRadius: 14,
+            textDecoration: "none",
+            color: "#fff",
+            marginBottom: 18,
+            boxShadow: "0 6px 18px rgba(106,23,140,0.25)",
+            transition: "transform 0.15s",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-2px)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 11, opacity: 0.85, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>
+                {taskCounts.from_ceo_open > 0 ? "👑 Tareas del CEO pendientes" : "📋 Tus tareas"}
+              </div>
+              <h3 style={{ fontSize: 20, fontWeight: 800, marginTop: 4 }}>
+                {taskCounts.open + taskCounts.in_progress} pendientes
+                {taskCounts.from_ceo_open > 0 && (
+                  <span style={{ fontSize: 14, marginLeft: 10, opacity: 0.85 }}>
+                    · {taskCounts.from_ceo_open} del CEO
+                  </span>
+                )}
+              </h3>
+            </div>
+            <div style={{ display: "flex", gap: 16, fontSize: 12, fontWeight: 600 }}>
+              <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800 }}>{taskCounts.open}</div><div style={{ opacity: 0.7, fontSize: 10 }}>PENDIENTES</div></div>
+              <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800 }}>{taskCounts.in_progress}</div><div style={{ opacity: 0.7, fontSize: 10 }}>EN CURSO</div></div>
+              <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800 }}>{taskCounts.done}</div><div style={{ opacity: 0.7, fontSize: 10 }}>COMPLETADAS</div></div>
+            </div>
+          </div>
+        </Link>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
         {families.map((f) => {
