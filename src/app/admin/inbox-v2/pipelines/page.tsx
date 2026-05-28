@@ -15,12 +15,14 @@ type Family = {
 };
 
 type TaskCounts = { open: number; in_progress: number; done: number; from_ceo_open: number; total: number };
+type AssignedCounts = { total: number; open: number; in_progress: number; done: number; by_type: Record<string, number> };
 
 export default function PipelinesIndex() {
   const [families, setFamilies] = useState<Family[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [taskCounts, setTaskCounts] = useState<TaskCounts | null>(null);
+  const [assignedByMe, setAssignedByMe] = useState<AssignedCounts | null>(null);
 
   useEffect(() => {
     fetch("/api/admin/inbox-v2/pipelines/families")
@@ -42,7 +44,34 @@ export default function PipelinesIndex() {
         setTaskCounts(c);
       })
       .catch(() => { /* sin tareas o sin sesión, no rompe el índice */ });
+
+    // Solo admin/CEO/CTO recibe 200; el resto recibe 403 y este tile no se monta.
+    fetch("/api/ceo/all-tasks?limit=500", { credentials: "include" })
+      .then(async (r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!j) return;
+        const tasks = (j.tasks ?? []) as Array<{ status: string; assignee_type: string }>;
+        const c: AssignedCounts = { total: tasks.length, open: 0, in_progress: 0, done: 0, by_type: {} };
+        for (const t of tasks) {
+          if (t.status === "open") c.open += 1;
+          else if (t.status === "in_progress") c.in_progress += 1;
+          else if (t.status === "done") c.done += 1;
+          if (t.status !== "done" && t.status !== "cancelled") {
+            c.by_type[t.assignee_type] = (c.by_type[t.assignee_type] ?? 0) + 1;
+          }
+        }
+        setAssignedByMe(c);
+      })
+      .catch(() => { /* no admin, no tile */ });
   }, []);
+
+  const TYPE_LABEL: Record<string, string> = {
+    agent: "🤝 Agentes",
+    psicologa: "🧠 Psicólogas",
+    videomaker: "🎬 Video",
+    jefe: "👩‍💼 Jefe psi",
+    traficker: "📊 Traficker",
+  };
 
   return (
     <div style={{ padding: "24px", maxWidth: 1200, margin: "0 auto" }}>
@@ -95,6 +124,54 @@ export default function PipelinesIndex() {
               <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800 }}>{taskCounts.open}</div><div style={{ opacity: 0.7, fontSize: 10 }}>PENDIENTES</div></div>
               <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800 }}>{taskCounts.in_progress}</div><div style={{ opacity: 0.7, fontSize: 10 }}>EN CURSO</div></div>
               <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800 }}>{taskCounts.done}</div><div style={{ opacity: 0.7, fontSize: 10 }}>COMPLETADAS</div></div>
+            </div>
+          </div>
+        </Link>
+      )}
+
+      {/* Tile CEO: tareas que él asignó (vista de control) */}
+      {assignedByMe && assignedByMe.total > 0 && (
+        <Link
+          href="/ceo/board"
+          style={{
+            display: "block",
+            padding: 18,
+            background: "linear-gradient(135deg, #4a0e63, #6A178C)",
+            borderRadius: 14,
+            textDecoration: "none",
+            color: "#fff",
+            marginBottom: 18,
+            boxShadow: "0 6px 18px rgba(74,14,99,0.3)",
+            transition: "transform 0.15s",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-2px)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 11, opacity: 0.85, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>
+                👑 Tareas que asigné
+              </div>
+              <h3 style={{ fontSize: 20, fontWeight: 800, marginTop: 4 }}>
+                {assignedByMe.open + assignedByMe.in_progress} en marcha
+                <span style={{ fontSize: 14, marginLeft: 10, opacity: 0.85 }}>
+                  · {assignedByMe.done} cerradas
+                </span>
+              </h3>
+              <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 12, flexWrap: "wrap" }}>
+                {Object.entries(assignedByMe.by_type)
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([k, v]) => (
+                    <span key={k} style={{ background: "rgba(255,255,255,0.18)", padding: "3px 10px", borderRadius: 999, fontWeight: 600 }}>
+                      {TYPE_LABEL[k] ?? k}: {v}
+                    </span>
+                  ))}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 16, fontSize: 12, fontWeight: 600 }}>
+              <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800 }}>{assignedByMe.open}</div><div style={{ opacity: 0.7, fontSize: 10 }}>PENDIENTES</div></div>
+              <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800 }}>{assignedByMe.in_progress}</div><div style={{ opacity: 0.7, fontSize: 10 }}>EN CURSO</div></div>
+              <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800 }}>{assignedByMe.done}</div><div style={{ opacity: 0.7, fontSize: 10 }}>COMPLETADAS</div></div>
             </div>
           </div>
         </Link>
