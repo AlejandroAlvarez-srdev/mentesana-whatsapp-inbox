@@ -81,20 +81,33 @@ export default function TemplatesModal({
     setSingleResult(null);
     setBulkResult(null);
     setLoadErr(null);
-    Promise.all([
-      fetch(`${apiBase}/meta-templates`, { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`meta-templates ${r.status}`))),
-      fetch(`${apiBase}/whatsapp-numbers`, { credentials: "include" }).then((r) => (r.ok ? r.json() : Promise.reject(`numbers ${r.status}`))),
-    ])
-      .then(([t, n]) => {
-        setTemplates(t.templates ?? []);
-        setTemplateErrors(t.errors ?? []);
+    // Cargamos números primero; las plantillas se recargan luego con phone_number_id seleccionado
+    // (efecto separado abajo) para que NUNCA aparezcan plantillas de otra WABA.
+    fetch(`${apiBase}/whatsapp-numbers`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(`numbers ${r.status}`)))
+      .then((n) => {
         const nums: WaNumber[] = (n.numbers ?? []).filter((x: WaNumber) => x.status === "active" && !x.is_pdf_number);
         setNumbers(nums);
         if (!fromNumberId) {
           const initial = defaultFromNumberId && nums.find((x) => x.phone_number_id === defaultFromNumberId) ? defaultFromNumberId : nums.find((x) => x.is_default)?.phone_number_id ?? nums[0]?.phone_number_id ?? "";
           setFromNumberId(initial);
         }
-        // Pre-seleccionar plantilla si viene defaultTemplateName
+      })
+      .catch((e) => setLoadErr(String(e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, defaultFromNumberId]);
+
+  // Cargar plantillas filtradas por el número seleccionado (WABA-scoped).
+  // El edge function /meta-templates acepta ?phone_number_id y SOLO retorna
+  // plantillas de la WABA dueña de ese número. Cero leakage entre cuentas.
+  useEffect(() => {
+    if (!open || !fromNumberId) { setTemplates([]); return; }
+    const url = `${apiBase}/meta-templates?phone_number_id=${encodeURIComponent(fromNumberId)}`;
+    fetch(url, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(`meta-templates ${r.status}`)))
+      .then((t) => {
+        setTemplates(t.templates ?? []);
+        setTemplateErrors(t.errors ?? []);
         if (defaultTemplateName) {
           const match = (t.templates ?? []).find((x: MetaTemplate) => x.name === defaultTemplateName && x.status === "APPROVED");
           if (match) setSelected(match);
@@ -102,7 +115,7 @@ export default function TemplatesModal({
       })
       .catch((e) => setLoadErr(String(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultFromNumberId, defaultTemplateName]);
+  }, [open, fromNumberId]);
 
   // Filtra por número origen (solo plantillas disponibles desde el WABA seleccionado)
   const filteredTpls = useMemo(() => {
