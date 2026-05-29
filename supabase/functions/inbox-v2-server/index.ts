@@ -361,8 +361,10 @@ async function metaSendTemplate(num: WaNumber, toPhone: string, templateName: st
   // ROUTING MM Lite: si el template es categoría MARKETING, enviamos por
   // /{phone-id}/marketing_messages (endpoint MM Lite). Cualquier otra categoría
   // (UTILITY, AUTHENTICATION) usa el endpoint clásico /messages.
-  // El número debe estar onboardeado a MM Lite (caso Soporte REDACTED_ID
-  // y Ventas REDACTED_ID — ambos en WABA REDACTED_ID).
+  // El número debe estar onboardeado a MM Lite. Actualmente: solo
+  // REDACTED_ID (Mente Sana Ventas WABA 2, +34 XXX XXX XXX,
+  // WABA REDACTED_ID). Los anteriores REDACTED_ID y
+  // REDACTED_ID (WABA REDACTED_ID) están BANNED desde 2026-05-29.
   const category = await fetchTemplateCategory(num, templateName, lang);
   const isMarketing = (category ?? '').toUpperCase() === 'MARKETING';
   const path = isMarketing ? 'marketing_messages' : 'messages';
