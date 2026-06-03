@@ -825,57 +825,96 @@ const inputStyle: React.CSSProperties = { width: "100%", padding: "7px 10px", bo
 const primaryBtn = (disabled: boolean): React.CSSProperties => ({ padding: "11px 18px", borderRadius: 8, border: "none", background: disabled ? "rgba(0,0,0,0.06)" : PURPLE, color: disabled ? "#888" : "#fff", fontSize: 13, fontWeight: 700, cursor: disabled ? "default" : "pointer" });
 const secondaryBtn = (disabled: boolean): React.CSSProperties => ({ padding: "11px 16px", borderRadius: 8, border: `1.5px solid ${disabled ? "rgba(0,0,0,0.1)" : PURPLE}`, background: "#fff", color: disabled ? "#888" : PURPLE, fontSize: 13, fontWeight: 700, cursor: disabled ? "default" : "pointer" });
 
-// Formatea un Date como "YYYY-MM-DDTHH:mm" en hora Europe/Madrid,
-// independiente del timezone del navegador. El servidor (parseScheduledFor)
-// interpreta el string como Madrid → así el admin ve y escoge siempre hora ES.
-function toMadridLocal(d: Date): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Madrid",
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hour12: false,
-  }).formatToParts(d).reduce<Record<string, string>>((a, p) => { a[p.type] = p.value; return a; }, {});
-  // en-CA da formato YYYY-MM-DD pero hora con coma — normalizamos
-  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+// Hoy en Europe/Madrid como "YYYY-MM-DD", independiente del navegador.
+function madridDateString(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(d);
 }
 
 function ScheduleBox({ scheduleAt, setScheduleAt, onSchedule, scheduling, result }: { scheduleAt: string; setScheduleAt: (v: string) => void; onSchedule: () => void; scheduling: boolean; result: { ok: boolean; msg: string } | null }) {
-  // Todos los presets producen hora Madrid; el server siempre la interpreta como Europe/Madrid.
-  function quickSet(offsetMin: number) {
-    setScheduleAt(toMadridLocal(new Date(Date.now() + offsetMin * 60_000)));
+  // Estado del picker en partes Madrid — no hay conversión de TZ, se manda tal cual.
+  // scheduleAt sigue siendo "YYYY-MM-DDTHH:mm" para mantener compatibilidad con el endpoint.
+  const m = scheduleAt.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/);
+  const today = madridDateString(new Date());
+  const date = m?.[1] ?? "";
+  const hour = m?.[2] ?? "";
+  const minute = m?.[3] ?? "";
+
+  function update(d: string, h: string, mi: string) {
+    if (!d || !h || !mi) { setScheduleAt(""); return; }
+    setScheduleAt(`${d}T${h}:${mi}`);
   }
-  function tomorrowAt(hour: number) {
-    // Día = mañana en Madrid; hora = HH:00 Madrid.
-    const todayMadrid = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit",
-    }).format(new Date());
-    const [y, m, dd] = todayMadrid.split("-").map(Number);
-    // Construimos "mañana" sumando 1 día como UTC y formateamos a Madrid para evitar DST edge-cases
-    const tomorrow = new Date(Date.UTC(y, m - 1, dd + 1, 12)); // mediodía UTC → siempre cae en mañana Madrid
-    const tStr = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit",
-    }).format(tomorrow);
-    setScheduleAt(`${tStr}T${String(hour).padStart(2, "0")}:00`);
+
+  function tomorrowAt(h: number) {
+    const todayMadrid = madridDateString(new Date());
+    const [y, mo, dd] = todayMadrid.split("-").map(Number);
+    const tStr = madridDateString(new Date(Date.UTC(y, mo - 1, dd + 1, 12)));
+    update(tStr, String(h).padStart(2, "0"), "00");
   }
+
   return (
     <div style={{ marginTop: 10, padding: 12, background: "rgba(106,23,140,0.05)", borderRadius: 10, border: `1px solid ${PURPLE}33` }}>
-      <div style={{ fontSize: 11, fontWeight: 800, color: PURPLE, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>⏰ Programar envío (hora España)</div>
-      <input
-        type="datetime-local"
-        value={scheduleAt}
-        onChange={(e) => setScheduleAt(e.target.value)}
-        min={toMadridLocal(new Date(Date.now() + 60_000))}
-        style={{ ...inputStyle, padding: "9px 12px", fontSize: 14 }}
-      />
-      <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-        <button onClick={() => quickSet(60)} style={chipBtn}>+1h</button>
-        <button onClick={() => quickSet(180)} style={chipBtn}>+3h</button>
-        <button onClick={() => tomorrowAt(10)} style={chipBtn}>Mañana 10:00</button>
-        <button onClick={() => tomorrowAt(18)} style={chipBtn}>Mañana 18:00</button>
+      <div style={{ fontSize: 11, fontWeight: 800, color: PURPLE, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+        ⏰ Programar envío · <span style={{ color: "#991b1b" }}>HORA ESPAÑA</span>
       </div>
-      <button onClick={onSchedule} disabled={scheduling || !scheduleAt} style={{ ...primaryBtn(scheduling || !scheduleAt), marginTop: 10, width: "100%" }}>
-        {scheduling ? "Programando…" : "✓ Confirmar programación"}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 0.8fr 0.8fr", gap: 6 }}>
+        <div>
+          <label style={lblStyle}>Fecha</label>
+          <input
+            type="date"
+            value={date}
+            min={today}
+            onChange={(e) => update(e.target.value, hour, minute)}
+            style={{ ...inputStyle, padding: "9px 10px", fontSize: 14 }}
+          />
+        </div>
+        <div>
+          <label style={lblStyle}>Hora (00–23)</label>
+          <select value={hour} onChange={(e) => update(date, e.target.value, minute || "00")} style={{ ...inputStyle, padding: "9px 10px", fontSize: 14 }}>
+            <option value="">--</option>
+            {Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0")).map((h) => (
+              <option key={h} value={h}>{h}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label style={lblStyle}>Min</label>
+          <select value={minute} onChange={(e) => update(date, hour || "09", e.target.value)} style={{ ...inputStyle, padding: "9px 10px", fontSize: 14 }}>
+            <option value="">--</option>
+            {["00", "05", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55"].map((mi) => (
+              <option key={mi} value={mi}>{mi}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+        <button onClick={() => tomorrowAt(10)} style={chipBtn}>Mañana 10:00</button>
+        <button onClick={() => tomorrowAt(15)} style={chipBtn}>Mañana 15:00</button>
+        <button onClick={() => tomorrowAt(18)} style={chipBtn}>Mañana 18:00</button>
+        <button onClick={() => tomorrowAt(20)} style={chipBtn}>Mañana 20:00</button>
+      </div>
+
+      <button
+        onClick={onSchedule}
+        disabled={scheduling || !date || !hour || !minute}
+        style={{ ...primaryBtn(scheduling || !date || !hour || !minute), marginTop: 10, width: "100%" }}
+      >
+        {scheduling ? "Programando…" : `✓ Programar para ${date && hour && minute ? `${date.split("-").reverse().join("/")} · ${hour}:${minute} h España` : "…"}`}
       </button>
-      {result && <div style={{ marginTop: 8, padding: 8, borderRadius: 6, background: result.ok ? "#ecfdf5" : "#fef2f2", color: result.ok ? "#065f46" : "#991b1b", fontSize: 12, fontWeight: 600 }}>{result.ok ? "✅ " : "❌ "}{result.msg}</div>}
+
+      {result && (
+        <div style={{ marginTop: 8, padding: 10, borderRadius: 6, background: result.ok ? "#ecfdf5" : "#fef2f2", color: result.ok ? "#065f46" : "#991b1b", fontSize: 12, fontWeight: 600, border: `1px solid ${result.ok ? "#a7f3d0" : "#fecaca"}` }}>
+          {result.ok ? "✅ " : "❌ NO SE ENVIÓ — "}{result.msg}
+          {!result.ok && (
+            <div style={{ marginTop: 4, fontSize: 11, fontWeight: 500, color: "#7f1d1d" }}>
+              La plantilla NO se envió. Revisa la fecha/hora y vuelve a darle a programar.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

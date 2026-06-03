@@ -68,27 +68,24 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ok: true, scheduled: data });
 }
 
-// "2026-05-21T15:30" del datetime-local picker → asumir Europe/Madrid.
-// ISO completos con Z u offset se respetan.
+// "2026-05-21T15:30" del picker → interpretar SIEMPRE como Europe/Madrid,
+// sin depender del timezone del servidor. ISO con Z u offset se respetan.
 function parseScheduledFor(v: string): Date | null {
   const s = String(v).trim();
   if (!s) return null;
   if (/Z$|[+-]\d{2}:?\d{2}$/.test(s)) return new Date(s);
-  // datetime-local sin zona → tratarlo como Europe/Madrid
-  // Calcular offset Madrid en esa fecha (CET=+1, CEST=+2)
-  const local = new Date(s);
-  if (Number.isNaN(local.getTime())) return null;
-  // Trick: format esa fecha con Intl y obtener el offset real
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return null;
+  const Y = +m[1], Mo = +m[2] - 1, D = +m[3], H = +m[4], Mi = +m[5], Se = +(m[6] ?? 0);
+  // Tomamos los campos como si fueran UTC y luego compensamos por el offset real de Madrid
+  // en ese instante (CET=+1 o CEST=+2). Esto da el UTC real correcto en DST y sin DST.
+  const naiveUtc = Date.UTC(Y, Mo, D, H, Mi, Se);
   const fmt = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Madrid", timeZoneName: "shortOffset" });
-  const parts = fmt.formatToParts(local);
-  const off = parts.find(p => p.type === "timeZoneName")?.value ?? "GMT+1";
-  const m = off.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
-  if (!m) return new Date(s + "Z");
-  const sign = m[1] === "-" ? -1 : 1;
-  const hh = parseInt(m[2], 10);
-  const mm = m[3] ? parseInt(m[3], 10) : 0;
+  const off = fmt.formatToParts(new Date(naiveUtc)).find(p => p.type === "timeZoneName")?.value ?? "GMT+1";
+  const om = off.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
+  const sign = om?.[1] === "-" ? -1 : 1;
+  const hh = om ? parseInt(om[2], 10) : 1;
+  const mm = om?.[3] ? parseInt(om[3], 10) : 0;
   const offsetMin = sign * (hh * 60 + mm);
-  // local construido como si fuera UTC → restar offset Madrid para obtener UTC real
-  const utcMs = Date.UTC(local.getFullYear(), local.getMonth(), local.getDate(), local.getHours(), local.getMinutes(), local.getSeconds()) - offsetMin * 60_000;
-  return new Date(utcMs);
+  return new Date(naiveUtc - offsetMin * 60_000);
 }
