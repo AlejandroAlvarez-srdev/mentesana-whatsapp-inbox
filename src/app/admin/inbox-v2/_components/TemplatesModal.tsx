@@ -825,20 +825,36 @@ const inputStyle: React.CSSProperties = { width: "100%", padding: "7px 10px", bo
 const primaryBtn = (disabled: boolean): React.CSSProperties => ({ padding: "11px 18px", borderRadius: 8, border: "none", background: disabled ? "rgba(0,0,0,0.06)" : PURPLE, color: disabled ? "#888" : "#fff", fontSize: 13, fontWeight: 700, cursor: disabled ? "default" : "pointer" });
 const secondaryBtn = (disabled: boolean): React.CSSProperties => ({ padding: "11px 16px", borderRadius: 8, border: `1.5px solid ${disabled ? "rgba(0,0,0,0.1)" : PURPLE}`, background: "#fff", color: disabled ? "#888" : PURPLE, fontSize: 13, fontWeight: 700, cursor: disabled ? "default" : "pointer" });
 
+// Formatea un Date como "YYYY-MM-DDTHH:mm" en hora Europe/Madrid,
+// independiente del timezone del navegador. El servidor (parseScheduledFor)
+// interpreta el string como Madrid → así el admin ve y escoge siempre hora ES.
+function toMadridLocal(d: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Madrid",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(d).reduce<Record<string, string>>((a, p) => { a[p.type] = p.value; return a; }, {});
+  // en-CA da formato YYYY-MM-DD pero hora con coma — normalizamos
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
 function ScheduleBox({ scheduleAt, setScheduleAt, onSchedule, scheduling, result }: { scheduleAt: string; setScheduleAt: (v: string) => void; onSchedule: () => void; scheduling: boolean; result: { ok: boolean; msg: string } | null }) {
-  // datetime-local: el navegador lo trata como hora local; en producción (Spain) eso es Madrid.
-  // Sugerimos defaults amigables: en 1h, mañana 10:00, mañana 18:00.
+  // Todos los presets producen hora Madrid; el server siempre la interpreta como Europe/Madrid.
   function quickSet(offsetMin: number) {
-    const d = new Date(Date.now() + offsetMin * 60_000);
-    // Formatear como datetime-local "YYYY-MM-DDTHH:mm"
-    const pad = (n: number) => String(n).padStart(2, "0");
-    setScheduleAt(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+    setScheduleAt(toMadridLocal(new Date(Date.now() + offsetMin * 60_000)));
   }
   function tomorrowAt(hour: number) {
-    const d = new Date(Date.now() + 86_400_000);
-    d.setHours(hour, 0, 0, 0);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    setScheduleAt(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+    // Día = mañana en Madrid; hora = HH:00 Madrid.
+    const todayMadrid = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(new Date());
+    const [y, m, dd] = todayMadrid.split("-").map(Number);
+    // Construimos "mañana" sumando 1 día como UTC y formateamos a Madrid para evitar DST edge-cases
+    const tomorrow = new Date(Date.UTC(y, m - 1, dd + 1, 12)); // mediodía UTC → siempre cae en mañana Madrid
+    const tStr = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(tomorrow);
+    setScheduleAt(`${tStr}T${String(hour).padStart(2, "0")}:00`);
   }
   return (
     <div style={{ marginTop: 10, padding: 12, background: "rgba(106,23,140,0.05)", borderRadius: 10, border: `1px solid ${PURPLE}33` }}>
@@ -847,7 +863,7 @@ function ScheduleBox({ scheduleAt, setScheduleAt, onSchedule, scheduling, result
         type="datetime-local"
         value={scheduleAt}
         onChange={(e) => setScheduleAt(e.target.value)}
-        min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+        min={toMadridLocal(new Date(Date.now() + 60_000))}
         style={{ ...inputStyle, padding: "9px 12px", fontSize: 14 }}
       />
       <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
