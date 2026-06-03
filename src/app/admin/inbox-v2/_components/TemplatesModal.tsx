@@ -69,6 +69,12 @@ export default function TemplatesModal({
   const [bodyVars, setBodyVars] = useState<string[]>([]);
   const [headerVars, setHeaderVars] = useState<string[]>([]);
   const [headerMediaUrl, setHeaderMediaUrl] = useState("");
+  // media_id (Meta) resuelto desde Drive/URL externa. Si está presente, se
+  // usa `{ id }` en vez de `{ link }` para el header de la plantilla — necesario
+  // porque Meta NO sigue las URLs de Drive (Content-Disposition incorrecto).
+  const [headerMediaId, setHeaderMediaId] = useState<string | null>(null);
+  const [headerUploadStatus, setHeaderUploadStatus] = useState<"idle" | "uploading" | "ok" | "error">("idle");
+  const [headerUploadMsg, setHeaderUploadMsg] = useState<string>("");
 
   // Programar plantilla (scheduler)
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -132,6 +138,9 @@ export default function TemplatesModal({
       setBodyVars([]);
       setHeaderVars([]);
       setHeaderMediaUrl("");
+      setHeaderMediaId(null);
+      setHeaderUploadStatus("idle");
+      setHeaderUploadMsg("");
       return;
     }
     const body = componentText(selected, "BODY") ?? "";
@@ -139,7 +148,48 @@ export default function TemplatesModal({
     setBodyVars(Array(countVars(body)).fill(""));
     setHeaderVars(Array(countVars(header)).fill(""));
     setHeaderMediaUrl("");
+    setHeaderMediaId(null);
+    setHeaderUploadStatus("idle");
+    setHeaderUploadMsg("");
   }, [selected?.name, selected?.language]);
+
+  // Auto-resuelve URLs problemáticas (Drive/Dropbox/etc) a media_id Meta.
+  // Detecta cualquier dominio que sabemos rompe el download directo de Meta
+  // y sube el binario para que la plantilla se envíe con `{ id }`.
+  useEffect(() => {
+    const url = headerMediaUrl.trim();
+    setHeaderMediaId(null);
+    setHeaderUploadStatus("idle");
+    setHeaderUploadMsg("");
+    if (!url || !fromNumberId) return;
+    const needsUpload = /drive\.google\.com|docs\.google\.com|dropbox\.com|onedrive\.live|1drv\.ms|sharepoint\.com/.test(url);
+    if (!needsUpload) return;
+    const t = setTimeout(async () => {
+      setHeaderUploadStatus("uploading");
+      setHeaderUploadMsg("Subiendo a Meta…");
+      try {
+        const r = await fetch("/api/admin/whatsapp/upload-media-from-url", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url, phone_number_id: fromNumberId }),
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) {
+          setHeaderUploadStatus("error");
+          setHeaderUploadMsg(j.error ? `Error: ${j.error}${j.meta_response?.error?.message ? ` — ${j.meta_response.error.message}` : ""}` : `HTTP ${r.status}`);
+          return;
+        }
+        setHeaderMediaId(j.media_id);
+        setHeaderUploadStatus("ok");
+        setHeaderUploadMsg(`✓ Subido a Meta · media_id ${j.media_id} (~30 días)`);
+      } catch (e: unknown) {
+        setHeaderUploadStatus("error");
+        setHeaderUploadMsg(`Error de red: ${String((e as Error).message ?? e).slice(0, 120)}`);
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [headerMediaUrl, fromNumberId]);
 
   const parsedPhones = useMemo(() => parsePhones(bulkInput), [bulkInput]);
 
@@ -181,9 +231,11 @@ export default function TemplatesModal({
         if (!headerMediaUrl.trim()) return out; // se filtra fuera (botón disabled)
         const fmt = (headerComp.format ?? "").toLowerCase();
         const param: any = { type: fmt };
-        if (fmt === "image") param.image = { link: headerMediaUrl.trim() };
-        else if (fmt === "video") param.video = { link: headerMediaUrl.trim() };
-        else if (fmt === "document") param.document = { link: headerMediaUrl.trim(), filename: headerMediaUrl.split("/").slice(-1)[0] || "doc.pdf" };
+        const useId = !!headerMediaId;
+        const filename = headerMediaUrl.split("/").slice(-1)[0] || "doc.pdf";
+        if (fmt === "image") param.image = useId ? { id: headerMediaId } : { link: headerMediaUrl.trim() };
+        else if (fmt === "video") param.video = useId ? { id: headerMediaId } : { link: headerMediaUrl.trim() };
+        else if (fmt === "document") param.document = useId ? { id: headerMediaId, filename } : { link: headerMediaUrl.trim(), filename };
         out.push({ type: "header", parameters: [param] });
       } else if (headerComp.format === "TEXT" && headerVars.length > 0) {
         out.push({ type: "header", parameters: headerVars.map((v) => ({ type: "text", text: v })) });
@@ -200,6 +252,8 @@ export default function TemplatesModal({
     if (!fromNumberId) return { ok: false, reason: "Elige número de origen" };
     // Media del header (URL) sigue siendo compartida también en personalized mode
     if (needsMediaHeader && !headerMediaUrl.trim()) return { ok: false, reason: "Falta URL del media del header" };
+    if (headerUploadStatus === "uploading") return { ok: false, reason: "Esperando la subida del video a Meta…" };
+    if (headerUploadStatus === "error") return { ok: false, reason: `Subida fallida: ${headerUploadMsg || "ver detalle"}` };
     if (mode === "bulk" && personalize) {
       // En personalizado, los textos de variables vienen por línea, no de los inputs globales
       if (validRecipientsCount === 0) return { ok: false, reason: "No hay líneas válidas" };
@@ -221,9 +275,11 @@ export default function TemplatesModal({
       if (needsMediaHeader && headerMediaUrl.trim()) {
         const fmt = (headerComp!.format ?? "").toLowerCase();
         const param: any = { type: fmt };
-        if (fmt === "image") param.image = { link: headerMediaUrl.trim() };
-        else if (fmt === "video") param.video = { link: headerMediaUrl.trim() };
-        else if (fmt === "document") param.document = { link: headerMediaUrl.trim(), filename: headerMediaUrl.split("/").slice(-1)[0] || "doc.pdf" };
+        const useId = !!headerMediaId;
+        const filename = headerMediaUrl.split("/").slice(-1)[0] || "doc.pdf";
+        if (fmt === "image") param.image = useId ? { id: headerMediaId } : { link: headerMediaUrl.trim() };
+        else if (fmt === "video") param.video = useId ? { id: headerMediaId } : { link: headerMediaUrl.trim() };
+        else if (fmt === "document") param.document = useId ? { id: headerMediaId, filename } : { link: headerMediaUrl.trim(), filename };
         components.push({ type: "header", parameters: [param] });
       } else if (headerIsText) {
         components.push({ type: "header", parameters: r.headerVars.map((v) => ({ type: "text", text: v })) });
@@ -503,8 +559,21 @@ export default function TemplatesModal({
             {selected && needsMediaHeader && (
               <div style={{ marginBottom: 12 }}>
                 <label style={lblStyle}>Header {headerComp?.format}</label>
-                <input type="url" value={headerMediaUrl} onChange={(e) => setHeaderMediaUrl(e.target.value)} placeholder="https://… URL pública del media" style={inputStyle} />
-                <div style={{ fontSize: 10, color: "#aaa", marginTop: 2 }}>Debe ser HTTPS pública. Meta descargará el media.</div>
+                <input type="url" value={headerMediaUrl} onChange={(e) => setHeaderMediaUrl(e.target.value)} placeholder="https://… o link de Google Drive" style={inputStyle} />
+                <div style={{ fontSize: 10, color: "#aaa", marginTop: 2 }}>
+                  Acepta URL HTTPS directa o link compartido de Google Drive (auto-subimos el video a Meta como media_id).
+                </div>
+                {headerUploadStatus !== "idle" && (
+                  <div style={{
+                    marginTop: 6, padding: "6px 9px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                    background: headerUploadStatus === "ok" ? "rgba(16,185,129,0.1)" : headerUploadStatus === "error" ? "rgba(220,38,38,0.1)" : "rgba(245,158,11,0.1)",
+                    color: headerUploadStatus === "ok" ? "#065f46" : headerUploadStatus === "error" ? "#991b1b" : "#92400e",
+                    border: `1px solid ${headerUploadStatus === "ok" ? "rgba(16,185,129,0.3)" : headerUploadStatus === "error" ? "rgba(220,38,38,0.3)" : "rgba(245,158,11,0.3)"}`,
+                  }}>
+                    {headerUploadStatus === "uploading" && "⏳ "}
+                    {headerUploadMsg}
+                  </div>
+                )}
               </div>
             )}
 
