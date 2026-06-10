@@ -87,6 +87,11 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   const [windowInfo, setWindowInfo] = useState<WindowInfo | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastMsgTsRef = useRef<string | null>(null);
+  // Conversación activa AHORA — los fetches en vuelo (loadFull/poll) comparan contra esto
+  // antes de hacer setState; si el usuario ya cambió de conv, la respuesta tardía se descarta
+  // (sin esto, al cambiar rápido de chat se "pegaban" los mensajes de la conv anterior).
+  const convIdRef = useRef<string | null>(conversationId);
+  convIdRef.current = conversationId;
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   // Refs para gobernar el scroll del chat con orden lógico:
@@ -124,12 +129,14 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
 
   const loadFull = useCallback(async () => {
     if (!conversationId) return;
+    const reqId = conversationId;
     setLoading(true);
     setErr(null);
     try {
-      const r = await fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}`, { credentials: "include" });
+      const r = await fetch(`${apiBase}/conversations/${encodeURIComponent(reqId)}`, { credentials: "include" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
+      if (convIdRef.current !== reqId) return; // respuesta tardía de otra conv
       setConv(d.conversation);
       setMessages(d.messages ?? []);
       const last = (d.messages ?? []).slice(-1)[0]?.timestamp ?? null;
@@ -137,11 +144,12 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
       // No marcamos como leído al abrir. Por regla del equipo, una conversación
       // solo deja de estar "unread" cuando el AGENTE responde — ver no cuenta.
     } catch (e: any) {
+      if (convIdRef.current !== reqId) return;
       setErr(String(e.message ?? e));
     } finally {
-      setLoading(false);
+      if (convIdRef.current === reqId) setLoading(false);
     }
-  }, [conversationId]);
+  }, [conversationId, apiBase]);
 
   useEffect(() => {
     setConv(null);
@@ -215,12 +223,13 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   // Cuando cambia la conversación, leer el número asignado (vía lead-profile) + ventana 24h
   useEffect(() => {
     if (!conversationId) { setAssignedNumber(null); setWindowInfo(null); return; }
-    fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/lead-profile`, { credentials: "include" })
+    const reqId = conversationId;
+    fetch(`${apiBase}/conversations/${encodeURIComponent(reqId)}/lead-profile`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setAssignedNumber(d?.assigned_wa_number ?? null));
-    fetch(`${apiBase}/conversations/${encodeURIComponent(conversationId)}/window`, { credentials: "include" })
+      .then((d) => { if (convIdRef.current === reqId) setAssignedNumber(d?.assigned_wa_number ?? null); });
+    fetch(`${apiBase}/conversations/${encodeURIComponent(reqId)}/window`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setWindowInfo(d ?? null));
+      .then((d) => { if (convIdRef.current === reqId) setWindowInfo(d ?? null); });
   }, [conversationId, apiBase, messages.length]);
 
   async function assignNumber(phoneNumberId: string) {
@@ -244,7 +253,9 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   // Realtime: WebSocket a Supabase, INSERT/UPDATE en messages_mentesana filtrado por conversation_id
   useMessagesRealtime(conversationId, {
     onInsert: (row) => {
-      if (!conv) return;
+      // conv puede ser de la conversación anterior mientras la nueva carga — verificar
+      // que el evento pertenece a la conv activa antes de enriquecer/añadir.
+      if (!conv || conv.id !== convIdRef.current || row.conversation_id !== conv.id) return;
       const enriched: Message = {
         ...(row as Message),
         is_lead: row.sender === conv.phone,
@@ -276,6 +287,7 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
         );
         if (!r.ok) return;
         const d = await r.json();
+        if (convIdRef.current !== conversationId) return; // respuesta tardía de otra conv
         const newMsgs: Message[] = d.messages ?? [];
         if (newMsgs.length > 0) {
           setMessages((prev) => [...prev, ...newMsgs.filter((m) => !prev.find((p) => p.id === m.id))]);
@@ -308,15 +320,17 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
 
   async function loadOlderMessages() {
     if (!conversationId || loadingOlder || !hasMoreOlder || messages.length === 0) return;
+    const reqId = conversationId;
     const before = messages[0].timestamp;
     const el = scrollRef.current;
     // Snapshot ANTES del setMessages → useLayoutEffect lo usa para preservar la posición visual exacta
     if (el) prependPreserveRef.current = { height: el.scrollHeight, top: el.scrollTop };
     setLoadingOlder(true);
     try {
-      const r = await fetch(`${olderEndpoint}?conv=${encodeURIComponent(conversationId)}&before=${encodeURIComponent(before)}&limit=80`, { credentials: "include" });
+      const r = await fetch(`${olderEndpoint}?conv=${encodeURIComponent(reqId)}&before=${encodeURIComponent(before)}&limit=80`, { credentials: "include" });
       if (!r.ok) return;
       const d = await r.json();
+      if (convIdRef.current !== reqId) return; // respuesta tardía de otra conv
       const older: Message[] = d.messages ?? [];
       if (older.length === 0) {
         setHasMoreOlder(false);
