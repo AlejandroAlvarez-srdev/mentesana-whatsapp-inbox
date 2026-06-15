@@ -247,7 +247,8 @@ function PackageCard({ p, onSchedule }: { p: Package; onSchedule: (svc: PackageS
                     {s.provider_name && <span style={{ color: "#888", fontWeight: 500 }}> · {s.provider_name}</span>}
                   </div>
                   <span style={{ fontSize: 11, fontWeight: 800, color: s.remaining > 0 ? "#065f46" : "#888" }}>
-                    {s.remaining}/{s.sessions_in_package} restantes
+                    <span style={{ color: "#1a1a2e" }}>{s.used}/{s.sessions_in_package} usadas</span>
+                    <span style={{ color: "#888", fontWeight: 600 }}> · {s.remaining} libres</span>
                   </span>
                 </div>
                 <div style={{ height: 4, background: "rgba(0,0,0,0.06)", borderRadius: 2, marginTop: 4, overflow: "hidden" }}>
