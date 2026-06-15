@@ -6,7 +6,7 @@ const PURPLE = "#6A178C";
 
 type PackageService = { id: number; service_id: number; service_name: string; provider_id: number; provider_name: string | null; sessions_in_package: number; used: number; remaining: number };
 type Package = { package_customer_id: number; package_id: number; name: string; status: string; start: string | null; end: string | null; bookings_count: number; services: PackageService[]; is_expired: boolean };
-type Appt = { appointment_id: number; booking_id: number; booking_start_utc: string; service_name: string | null; provider_id: number | null; provider_name: string | null; google_meet_url: string | null; booking_status: string; from_package: boolean; amelia_admin_url: string };
+type Appt = { appointment_id: number; booking_id: number; booking_start_utc: string; service_id: number | null; service_name: string | null; provider_id: number | null; provider_name: string | null; google_meet_url: string | null; booking_status: string; from_package: boolean; amelia_admin_url: string; reschedule_count: number };
 type Past = { appointment_id: number; booking_id: number; booking_start_utc: string; service_name: string | null; provider_name: string | null; booking_status: string };
 type Resp = {
   customer: { id: number; name: string; email: string | null; phone: string | null } | null;
@@ -270,8 +270,13 @@ function PackageCard({ p, onSchedule }: { p: Package; onSchedule: (svc: PackageS
   );
 }
 
+// Diagnóstico 9,99€ = servicios 8/11. Solo se puede reprogramar 1 vez.
+const DIAG_SERVICE_IDS = [8, 11];
+
 function ApptRow({ a, conversationId, onReschedule, onChangeProvider, onCancel }: { a: Appt; conversationId: string | null; onReschedule: () => void; onChangeProvider: () => void; onCancel: () => Promise<void> }) {
   const [sendingMeet, setSendingMeet] = useState(false);
+  const isDiag = a.service_id != null && DIAG_SERVICE_IDS.includes(a.service_id);
+  const rescheduleLocked = isDiag && (a.reschedule_count ?? 0) >= 1;
 
   async function sendMeetToChat() {
     if (!conversationId || !a.google_meet_url) return;
@@ -305,13 +310,24 @@ function ApptRow({ a, conversationId, onReschedule, onChangeProvider, onCancel }
           📹 {a.google_meet_url}
         </a>
       )}
+      {rescheduleLocked && (
+        <div style={{ fontSize: 10.5, color: "#991b1b", fontWeight: 800, background: "rgba(153,27,27,0.08)", border: "1px solid rgba(153,27,27,0.18)", padding: "4px 7px", borderRadius: 6 }}>
+          🔒 Diagnóstico 9,99€ ya reprogramado 1 vez · no se puede reprogramar más
+        </div>
+      )}
       <div style={{ display: "flex", gap: 5, marginTop: 4, flexWrap: "wrap" }}>
         {a.google_meet_url && conversationId && (
           <button onClick={() => void sendMeetToChat()} disabled={sendingMeet} style={{ ...smallBtn(true), opacity: sendingMeet ? 0.5 : 1 }}>
             {sendingMeet ? "Enviando…" : "📨 Reenviar Meet"}
           </button>
         )}
-        <button onClick={onReschedule} style={smallBtn(false)}>🔄 Reagendar</button>
+        {rescheduleLocked ? (
+          <span title="Las citas de diagnóstico 9,99€ solo se pueden reprogramar una vez" style={{ ...smallBtn(false), cursor: "not-allowed", opacity: 0.5, background: "rgba(0,0,0,0.04)", color: "#999" }}>
+            🔒 No se puede reprogramar
+          </span>
+        ) : (
+          <button onClick={onReschedule} style={smallBtn(false)}>🔄 Reagendar</button>
+        )}
         <button onClick={onChangeProvider} style={smallBtn(false)}>👩‍⚕️ Cambiar psi</button>
         <button onClick={() => void onCancel()} style={smallBtnDanger}>❌ Cancelar</button>
         <a href={a.amelia_admin_url} target="_blank" rel="noreferrer" style={{ ...smallBtn(false), textDecoration: "none", marginLeft: "auto" }}>🔗 Admin</a>
