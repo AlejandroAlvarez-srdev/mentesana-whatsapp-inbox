@@ -98,6 +98,25 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
 
   const c = data.customer;
 
+  // Sumar / quitar sesiones del bono activo (escribe en Amelia vía booking-action).
+  async function adjustSessions(p: Package, s: PackageService, delta: number) {
+    const verbo = delta > 0 ? `añadir ${delta} sesión(es) a` : `quitar ${Math.abs(delta)} sesión(es) de`;
+    if (!confirm(`¿Seguro que quieres ${verbo} el bono "${p.name}" de ${c.name}?`)) return;
+    const r = await fetch("/api/agent/amelia/booking-action", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "adjust_sessions", package_customer_service_id: s.id, delta, conversation_id: conversationId }),
+    });
+    const d = await r.json();
+    if (r.ok) {
+      alert(`✅ Bono actualizado · ahora ${d.result.new_total} sesiones (${d.result.remaining} libres)`);
+      void load();
+    } else {
+      alert("❌ " + (d.friendly ?? d.error ?? "Error ajustando sesiones"));
+    }
+  }
+
   return (
     <div style={{ display: "grid", gap: 14 }}>
       {!hasAnyData && (
@@ -121,7 +140,7 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
           <div style={{ fontSize: 11, color: "#aaa" }}>Sin bonos comprados.</div>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {data.packages.map((p) => <PackageCard key={p.package_customer_id} p={p} onSchedule={(svc) => setScheduling({ service: svc })} />)}
+            {data.packages.map((p) => <PackageCard key={p.package_customer_id} p={p} onSchedule={(svc) => setScheduling({ service: svc })} onAdjust={adjustSessions} />)}
           </div>
         )}
       </Section>
@@ -223,8 +242,13 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
   );
 }
 
-function PackageCard({ p, onSchedule }: { p: Package; onSchedule: (svc: PackageService) => void }) {
+function PackageCard({ p, onSchedule, onAdjust }: { p: Package; onSchedule: (svc: PackageService) => void; onAdjust: (p: Package, svc: PackageService, delta: number) => Promise<void> }) {
   const expired = p.is_expired;
+  const [busy, setBusy] = useState(false);
+  async function adjust(s: PackageService, delta: number) {
+    setBusy(true);
+    try { await onAdjust(p, s, delta); } finally { setBusy(false); }
+  }
   return (
     <div style={{ padding: 10, background: "#fff", borderRadius: 10, border: `1px solid ${expired ? "rgba(0,0,0,0.08)" : "rgba(16,185,129,0.25)"}`, opacity: expired ? 0.6 : 1 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
@@ -250,6 +274,22 @@ function PackageCard({ p, onSchedule }: { p: Package; onSchedule: (svc: PackageS
                     <span style={{ color: "#1a1a2e" }}>{s.used}/{s.sessions_in_package} usadas</span>
                     <span style={{ color: "#888", fontWeight: 600 }}> · {s.remaining} libres</span>
                   </span>
+                  {!expired && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }} title="Sumar o quitar sesiones del bono">
+                      <button
+                        onClick={() => void adjust(s, -1)}
+                        disabled={busy || s.sessions_in_package <= s.used}
+                        title={s.sessions_in_package <= s.used ? "No se puede bajar de las sesiones ya usadas" : "Quitar 1 sesión"}
+                        style={{ ...adjustBtn, opacity: busy || s.sessions_in_package <= s.used ? 0.4 : 1, cursor: busy || s.sessions_in_package <= s.used ? "not-allowed" : "pointer" }}
+                      >−</button>
+                      <button
+                        onClick={() => void adjust(s, +1)}
+                        disabled={busy}
+                        title="Añadir 1 sesión"
+                        style={{ ...adjustBtn, opacity: busy ? 0.4 : 1, cursor: busy ? "not-allowed" : "pointer" }}
+                      >+</button>
+                    </span>
+                  )}
                 </div>
                 <div style={{ height: 4, background: "rgba(0,0,0,0.06)", borderRadius: 2, marginTop: 4, overflow: "hidden" }}>
                   <div style={{ width: `${pctUsed}%`, height: "100%", background: pctUsed === 100 ? "#dc2626" : pctUsed >= 70 ? "#f59e0b" : "#16a34a", transition: "width 0.3s" }} />
@@ -591,4 +631,5 @@ const smallBtn = (primary: boolean): React.CSSProperties => ({
   padding: "5px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: primary ? "none" : "1px solid rgba(0,0,0,0.1)", background: primary ? PURPLE : "#fff", color: primary ? "#fff" : "#475569", cursor: "pointer", fontFamily: "inherit",
 });
 const smallBtnDanger: React.CSSProperties = { padding: "5px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: "1px solid #fecaca", background: "#fee", color: "#991b1b", cursor: "pointer", fontFamily: "inherit" };
+const adjustBtn: React.CSSProperties = { width: 22, height: 22, lineHeight: "20px", textAlign: "center", padding: 0, fontSize: 14, fontWeight: 900, borderRadius: 6, border: `1px solid ${PURPLE}55`, background: "#fff", color: PURPLE, fontFamily: "inherit" };
 const primaryBtn: React.CSSProperties = { padding: "7px 14px", fontSize: 12, fontWeight: 800, borderRadius: 8, border: "none", background: "linear-gradient(135deg, #6A178C 0%, #8B2FB5 100%)", color: "#fff", cursor: "pointer", fontFamily: "inherit" };
