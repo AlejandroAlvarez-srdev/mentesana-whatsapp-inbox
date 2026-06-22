@@ -50,6 +50,7 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
   const [scheduling, setScheduling] = useState<{ service: PackageService } | null>(null);
   const [rescheduling, setRescheduling] = useState<Appt | null>(null);
   const [changingProvider, setChangingProvider] = useState<Appt | null>(null);
+  const [adjusting, setAdjusting] = useState<{ p: Package; s: PackageService; sign: 1 | -1 } | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
 
   async function load() {
@@ -98,25 +99,6 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
 
   const c = data.customer;
 
-  // Sumar / quitar sesiones del bono activo (escribe en Amelia vía booking-action).
-  async function adjustSessions(p: Package, s: PackageService, delta: number) {
-    const verbo = delta > 0 ? `añadir ${delta} sesión(es) a` : `quitar ${Math.abs(delta)} sesión(es) de`;
-    if (!confirm(`¿Seguro que quieres ${verbo} el bono "${p.name}" de ${c.name}?`)) return;
-    const r = await fetch("/api/agent/amelia/booking-action", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "adjust_sessions", package_customer_service_id: s.id, delta, conversation_id: conversationId }),
-    });
-    const d = await r.json();
-    if (r.ok) {
-      alert(`✅ Bono actualizado · ahora ${d.result.new_total} sesiones (${d.result.remaining} libres)`);
-      void load();
-    } else {
-      alert("❌ " + (d.friendly ?? d.error ?? "Error ajustando sesiones"));
-    }
-  }
-
   return (
     <div style={{ display: "grid", gap: 14 }}>
       {!hasAnyData && (
@@ -140,7 +122,7 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
           <div style={{ fontSize: 11, color: "#aaa" }}>Sin bonos comprados.</div>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {data.packages.map((p) => <PackageCard key={p.package_customer_id} p={p} onSchedule={(svc) => setScheduling({ service: svc })} onAdjust={adjustSessions} />)}
+            {data.packages.map((p) => <PackageCard key={p.package_customer_id} p={p} onSchedule={(svc) => setScheduling({ service: svc })} onAdjust={(pp, svc, sign) => setAdjusting({ p: pp, s: svc, sign })} />)}
           </div>
         )}
       </Section>
@@ -226,6 +208,17 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
           onChanged={() => { setChangingProvider(null); void load(); }}
         />
       )}
+      {adjusting && (
+        <AdjustSessionsModal
+          p={adjusting.p}
+          s={adjusting.s}
+          sign={adjusting.sign}
+          customerName={c.name}
+          conversationId={conversationId}
+          onClose={() => setAdjusting(null)}
+          onDone={() => { setAdjusting(null); void load(); }}
+        />
+      )}
     </div>
   );
 }
@@ -242,13 +235,8 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
   );
 }
 
-function PackageCard({ p, onSchedule, onAdjust }: { p: Package; onSchedule: (svc: PackageService) => void; onAdjust: (p: Package, svc: PackageService, delta: number) => Promise<void> }) {
+function PackageCard({ p, onSchedule, onAdjust }: { p: Package; onSchedule: (svc: PackageService) => void; onAdjust: (p: Package, svc: PackageService, sign: 1 | -1) => void }) {
   const expired = p.is_expired;
-  const [busy, setBusy] = useState(false);
-  async function adjust(s: PackageService, delta: number) {
-    setBusy(true);
-    try { await onAdjust(p, s, delta); } finally { setBusy(false); }
-  }
   return (
     <div style={{ padding: 10, background: "#fff", borderRadius: 10, border: `1px solid ${expired ? "rgba(0,0,0,0.08)" : "rgba(16,185,129,0.25)"}`, opacity: expired ? 0.6 : 1 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
@@ -275,18 +263,17 @@ function PackageCard({ p, onSchedule, onAdjust }: { p: Package; onSchedule: (svc
                     <span style={{ color: "#888", fontWeight: 600 }}> · {s.remaining} libres</span>
                   </span>
                   {!expired && (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }} title="Sumar o quitar sesiones del bono">
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }} title="Sumar o quitar sesiones del bono (pide motivo)">
                       <button
-                        onClick={() => void adjust(s, -1)}
-                        disabled={busy || s.sessions_in_package <= s.used}
-                        title={s.sessions_in_package <= s.used ? "No se puede bajar de las sesiones ya usadas" : "Quitar 1 sesión"}
-                        style={{ ...adjustBtn, opacity: busy || s.sessions_in_package <= s.used ? 0.4 : 1, cursor: busy || s.sessions_in_package <= s.used ? "not-allowed" : "pointer" }}
+                        onClick={() => onAdjust(p, s, -1)}
+                        disabled={s.sessions_in_package <= s.used}
+                        title={s.sessions_in_package <= s.used ? "No se puede bajar de las sesiones ya usadas" : "Quitar sesiones"}
+                        style={{ ...adjustBtn, opacity: s.sessions_in_package <= s.used ? 0.4 : 1, cursor: s.sessions_in_package <= s.used ? "not-allowed" : "pointer" }}
                       >−</button>
                       <button
-                        onClick={() => void adjust(s, +1)}
-                        disabled={busy}
-                        title="Añadir 1 sesión"
-                        style={{ ...adjustBtn, opacity: busy ? 0.4 : 1, cursor: busy ? "not-allowed" : "pointer" }}
+                        onClick={() => onAdjust(p, s, +1)}
+                        title="Añadir sesiones"
+                        style={adjustBtn}
                       >+</button>
                     </span>
                   )}
@@ -599,6 +586,85 @@ function ChangeProviderModal({ appt, providers, conversationId, onClose, onChang
         <button onClick={onClose} style={smallBtn(false)}>Cancelar</button>
         <button onClick={go} disabled={!picked || saving} style={{ ...primaryBtn, opacity: !picked || saving ? 0.5 : 1, cursor: !picked || saving ? "default" : "pointer" }}>
           {saving ? "Cambiando…" : "✅ Confirmar cambio"}
+        </button>
+      </ModalFooter>
+    </ModalShell>
+  );
+}
+
+function AdjustSessionsModal({ p, s, sign, customerName, conversationId, onClose, onDone }: { p: Package; s: PackageService; sign: 1 | -1; customerName: string; conversationId: string | null; onClose: () => void; onDone: () => void }) {
+  const add = sign > 0;
+  const maxRemovable = Math.max(0, s.sessions_in_package - s.used); // no se puede bajar de lo ya usado
+  const [qty, setQty] = useState(1);
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const qtyValid = add ? qty >= 1 : qty >= 1 && qty <= maxRemovable;
+  const reasonValid = reason.trim().length >= 3;
+  const canSubmit = qtyValid && reasonValid && !saving;
+  const newTotal = s.sessions_in_package + sign * qty;
+
+  async function submit() {
+    if (!canSubmit) return;
+    setSaving(true);
+    try {
+      const r = await fetch("/api/agent/amelia/booking-action", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "adjust_sessions", package_customer_service_id: s.id, delta: sign * qty, reason: reason.trim(), conversation_id: conversationId }),
+      });
+      const d = await r.json();
+      if (r.ok) {
+        alert(`✅ Bono actualizado · ahora ${d.result.new_total} sesiones (${d.result.remaining} libres)`);
+        onDone();
+      } else {
+        alert("❌ " + (d.friendly ?? d.error ?? "Error ajustando sesiones"));
+      }
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <ModalShell
+      title={add ? "➕ Añadir sesiones al bono" : "➖ Quitar sesiones del bono"}
+      subtitle={`${customerName} · ${p.name} · ${s.service_name ?? "servicio"} · ${s.used}/${s.sessions_in_package} usadas`}
+      onClose={onClose}
+    >
+      <div style={{ display: "grid", gap: 14 }}>
+        <div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 800, color: "#475569", marginBottom: 5 }}>
+            {add ? "¿Cuántas sesiones añadir?" : "¿Cuántas sesiones quitar?"}
+          </label>
+          <input
+            type="number" min={1} max={add ? undefined : maxRemovable} value={qty}
+            onChange={(e) => setQty(Math.max(1, Math.trunc(Number(e.target.value) || 1)))}
+            style={{ width: 100, padding: "7px 10px", fontSize: 13, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, fontFamily: "inherit" }}
+          />
+          <div style={{ fontSize: 11, color: "#888", marginTop: 5 }}>
+            Total: <strong>{s.sessions_in_package}</strong> → <strong style={{ color: PURPLE }}>{newTotal}</strong> sesiones
+            {!add && <span> · máx. a quitar: {maxRemovable}</span>}
+          </div>
+          {!qtyValid && !add && <div style={{ fontSize: 11, color: "#991b1b", marginTop: 4 }}>No puedes quitar más de {maxRemovable} (las demás ya están usadas/reservadas).</div>}
+        </div>
+
+        <div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 800, color: "#475569", marginBottom: 5 }}>
+            Motivo <span style={{ color: "#dc2626" }}>*</span> <span style={{ fontWeight: 500, color: "#888" }}>(obligatorio · queda registrado)</span>
+          </label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={add ? "Ej: sesión de cortesía por incidencia con la psicóloga…" : "Ej: el paciente no compró todas las sesiones del plan…"}
+            rows={3}
+            style={{ width: "100%", padding: "8px 10px", fontSize: 12.5, border: `1px solid ${reason && !reasonValid ? "#fca5a5" : "rgba(0,0,0,0.12)"}`, borderRadius: 8, fontFamily: "inherit", boxSizing: "border-box", resize: "vertical" }}
+          />
+          {reason && !reasonValid && <div style={{ fontSize: 11, color: "#991b1b", marginTop: 4 }}>Escribe un motivo (mínimo 3 caracteres).</div>}
+        </div>
+      </div>
+      <ModalFooter>
+        <button onClick={onClose} style={smallBtn(false)}>Cancelar</button>
+        <button onClick={() => void submit()} disabled={!canSubmit} style={{ ...primaryBtn, opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "default" }}>
+          {saving ? "Guardando…" : add ? `✅ Añadir ${qty} sesión(es)` : `✅ Quitar ${qty} sesión(es)`}
         </button>
       </ModalFooter>
     </ModalShell>
