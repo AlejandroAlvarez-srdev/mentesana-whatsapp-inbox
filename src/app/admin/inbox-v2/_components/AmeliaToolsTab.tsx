@@ -12,6 +12,7 @@ type Resp = {
   customer: { id: number; name: string; email: string | null; phone: string | null } | null;
   packages: Package[];
   has_bono: boolean;
+  can_adjust_sessions?: boolean;
   upcoming: Appt[];
   past: Past[];
   amelia_admin_url: string;
@@ -122,7 +123,7 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
           <div style={{ fontSize: 11, color: "#aaa" }}>Sin bonos comprados.</div>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {data.packages.map((p) => <PackageCard key={p.package_customer_id} p={p} onSchedule={(svc) => setScheduling({ service: svc })} onAdjust={(pp, svc, sign) => setAdjusting({ p: pp, s: svc, sign })} />)}
+            {data.packages.map((p) => <PackageCard key={p.package_customer_id} p={p} canAdjust={!!data.can_adjust_sessions} onSchedule={(svc) => setScheduling({ service: svc })} onAdjust={(pp, svc, sign) => setAdjusting({ p: pp, s: svc, sign })} />)}
           </div>
         )}
       </Section>
@@ -235,7 +236,7 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
   );
 }
 
-function PackageCard({ p, onSchedule, onAdjust }: { p: Package; onSchedule: (svc: PackageService) => void; onAdjust: (p: Package, svc: PackageService, sign: 1 | -1) => void }) {
+function PackageCard({ p, canAdjust, onSchedule, onAdjust }: { p: Package; canAdjust: boolean; onSchedule: (svc: PackageService) => void; onAdjust: (p: Package, svc: PackageService, sign: 1 | -1) => void }) {
   const expired = p.is_expired;
   return (
     <div style={{ padding: 10, background: "#fff", borderRadius: 10, border: `1px solid ${expired ? "rgba(0,0,0,0.08)" : "rgba(16,185,129,0.25)"}`, opacity: expired ? 0.6 : 1 }}>
@@ -262,7 +263,7 @@ function PackageCard({ p, onSchedule, onAdjust }: { p: Package; onSchedule: (svc
                     <span style={{ color: "#1a1a2e" }}>{s.used}/{s.sessions_in_package} usadas</span>
                     <span style={{ color: "#888", fontWeight: 600 }}> · {s.remaining} libres</span>
                   </span>
-                  {!expired && (
+                  {!expired && canAdjust && (
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }} title="Sumar o quitar sesiones del bono (pide motivo)">
                       <button
                         onClick={() => onAdjust(p, s, -1)}
