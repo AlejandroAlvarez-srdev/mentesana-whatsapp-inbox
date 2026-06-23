@@ -52,6 +52,7 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
   const [rescheduling, setRescheduling] = useState<Appt | null>(null);
   const [changingProvider, setChangingProvider] = useState<Appt | null>(null);
   const [adjusting, setAdjusting] = useState<{ p: Package; s: PackageService; sign: 1 | -1 } | null>(null);
+  const [expiryEditing, setExpiryEditing] = useState<Package | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
 
   async function load() {
@@ -123,7 +124,7 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
           <div style={{ fontSize: 11, color: "#aaa" }}>Sin bonos comprados.</div>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {data.packages.map((p) => <PackageCard key={p.package_customer_id} p={p} canAdjust={!!data.can_adjust_sessions} onSchedule={(svc) => setScheduling({ service: svc })} onAdjust={(pp, svc, sign) => setAdjusting({ p: pp, s: svc, sign })} />)}
+            {data.packages.map((p) => <PackageCard key={p.package_customer_id} p={p} canAdjust={!!data.can_adjust_sessions} onSchedule={(svc) => setScheduling({ service: svc })} onAdjust={(pp, svc, sign) => setAdjusting({ p: pp, s: svc, sign })} onAdjustExpiry={(pp) => setExpiryEditing(pp)} />)}
           </div>
         )}
       </Section>
@@ -220,6 +221,15 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
           onDone={() => { setAdjusting(null); void load(); }}
         />
       )}
+      {expiryEditing && (
+        <ExpiryModal
+          p={expiryEditing}
+          customerName={c.name}
+          conversationId={conversationId}
+          onClose={() => setExpiryEditing(null)}
+          onDone={() => { setExpiryEditing(null); void load(); }}
+        />
+      )}
     </div>
   );
 }
@@ -236,7 +246,7 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
   );
 }
 
-function PackageCard({ p, canAdjust, onSchedule, onAdjust }: { p: Package; canAdjust: boolean; onSchedule: (svc: PackageService) => void; onAdjust: (p: Package, svc: PackageService, sign: 1 | -1) => void }) {
+function PackageCard({ p, canAdjust, onSchedule, onAdjust, onAdjustExpiry }: { p: Package; canAdjust: boolean; onSchedule: (svc: PackageService) => void; onAdjust: (p: Package, svc: PackageService, sign: 1 | -1) => void; onAdjustExpiry: (p: Package) => void }) {
   const expired = p.is_expired;
   return (
     <div style={{ padding: 10, background: "#fff", borderRadius: 10, border: `1px solid ${expired ? "rgba(0,0,0,0.08)" : "rgba(16,185,129,0.25)"}`, opacity: expired ? 0.6 : 1 }}>
@@ -244,9 +254,20 @@ function PackageCard({ p, canAdjust, onSchedule, onAdjust }: { p: Package; canAd
         <strong style={{ fontSize: 13, color: "#1a1a2e" }}>{p.name}</strong>
         {expired && <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "rgba(239,68,68,0.1)", color: "#991b1b", fontWeight: 700 }}>VENCIDO</span>}
       </div>
-      <div style={{ fontSize: 10, color: "#888", marginTop: 2 }}>
-        {p.start && <span>desde {new Date(p.start).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid" })}</span>}
-        {p.end && <span> · hasta {new Date(p.end).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid" })}</span>}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+        <div style={{ fontSize: 10, color: "#888" }}>
+          {p.start && <span>desde {new Date(p.start).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid" })}</span>}
+          {p.end ? <span> · hasta {new Date(p.end).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid" })}</span> : <span> · sin caducidad</span>}
+        </div>
+        {canAdjust && (
+          <button
+            onClick={() => onAdjustExpiry(p)}
+            title="Cambiar la fecha de caducidad del bono (pide motivo, queda registrado)"
+            style={expiryBtn}
+          >
+            📅 {p.end ? "Caducidad" : "Poner caducidad"}
+          </button>
+        )}
       </div>
       {p.services.length > 0 && (
         <div style={{ marginTop: 8, display: "grid", gap: 5 }}>
@@ -672,6 +693,84 @@ function AdjustSessionsModal({ p, s, sign, customerName, conversationId, onClose
   );
 }
 
+function ExpiryModal({ p, customerName, conversationId, onClose, onDone }: { p: Package; customerName: string; conversationId: string | null; onClose: () => void; onDone: () => void }) {
+  const currentEndYMD = p.end ? new Date(p.end).toLocaleDateString("en-CA", { timeZone: "Europe/Madrid" }) : null;
+  const todayYMD = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Madrid" });
+  const [date, setDate] = useState<string>(currentEndYMD ?? "");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(date) && date > todayYMD;
+  const reasonValid = reason.trim().length >= 3;
+  const canSubmit = dateValid && reasonValid && !saving;
+  const isShortening = !!(currentEndYMD && dateValid && date < currentEndYMD);
+  const fmtEnd = p.end ? new Date(p.end).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid" }) : null;
+
+  async function submit() {
+    if (!canSubmit) return;
+    setSaving(true);
+    try {
+      const r = await fetch("/api/agent/amelia/booking-action", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "adjust_expiry", package_customer_id: p.package_customer_id, new_end_date: date, reason: reason.trim(), conversation_id: conversationId }),
+      });
+      const d = await r.json();
+      if (r.ok) {
+        alert(`✅ Caducidad actualizada · ahora vence el ${new Date(d.result.new_end).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid" })}`);
+        onDone();
+      } else {
+        alert("❌ " + (d.friendly ?? d.error ?? "Error cambiando la caducidad"));
+      }
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <ModalShell
+      title="📅 Cambiar caducidad del bono"
+      subtitle={`${customerName} · ${p.name} · ${fmtEnd ? `vence ${fmtEnd}` : "sin caducidad"}`}
+      onClose={onClose}
+    >
+      <div style={{ display: "grid", gap: 14 }}>
+        <div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 800, color: "#475569", marginBottom: 5 }}>
+            Nueva fecha de caducidad
+          </label>
+          <input
+            type="date" value={date} min={todayYMD}
+            onChange={(e) => setDate(e.target.value)}
+            style={{ padding: "7px 10px", fontSize: 13, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, fontFamily: "inherit" }}
+          />
+          {date && !dateValid && <div style={{ fontSize: 11, color: "#991b1b", marginTop: 4 }}>La fecha debe ser futura (posterior a hoy).</div>}
+          {isShortening && fmtEnd && <div style={{ fontSize: 11, color: "#b45309", marginTop: 4 }}>⚠️ Estás ACORTANDO la caducidad (antes vencía el {fmtEnd}).</div>}
+          {p.is_expired && dateValid && <div style={{ fontSize: 11, color: "#065f46", marginTop: 4 }}>♻️ Este bono está vencido — al guardar volverá a estar activo.</div>}
+        </div>
+
+        <div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 800, color: "#475569", marginBottom: 5 }}>
+            Motivo <span style={{ color: "#dc2626" }}>*</span> <span style={{ fontWeight: 500, color: "#888" }}>(obligatorio · queda registrado)</span>
+          </label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Ej: ampliamos 1 mes porque la paciente estuvo de baja médica…"
+            rows={3}
+            style={{ width: "100%", padding: "8px 10px", fontSize: 12.5, border: `1px solid ${reason && !reasonValid ? "#fca5a5" : "rgba(0,0,0,0.12)"}`, borderRadius: 8, fontFamily: "inherit", boxSizing: "border-box", resize: "vertical" }}
+          />
+          {reason && !reasonValid && <div style={{ fontSize: 11, color: "#991b1b", marginTop: 4 }}>Escribe un motivo (mínimo 3 caracteres).</div>}
+        </div>
+      </div>
+      <ModalFooter>
+        <button onClick={onClose} style={smallBtn(false)}>Cancelar</button>
+        <button onClick={() => void submit()} disabled={!canSubmit} style={{ ...primaryBtn, opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "default" }}>
+          {saving ? "Guardando…" : "✅ Guardar caducidad"}
+        </button>
+      </ModalFooter>
+    </ModalShell>
+  );
+}
+
 function ModalShell({ title, subtitle, children, onClose }: { title: string; subtitle?: string; children: React.ReactNode; onClose: () => void }) {
   return (
     <>
@@ -699,4 +798,5 @@ const smallBtn = (primary: boolean): React.CSSProperties => ({
 });
 const smallBtnDanger: React.CSSProperties = { padding: "5px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: "1px solid #fecaca", background: "#fee", color: "#991b1b", cursor: "pointer", fontFamily: "inherit" };
 const adjustBtn: React.CSSProperties = { width: 22, height: 22, lineHeight: "20px", textAlign: "center", padding: 0, fontSize: 14, fontWeight: 900, borderRadius: 6, border: `1px solid ${PURPLE}55`, background: "#fff", color: PURPLE, fontFamily: "inherit" };
+const expiryBtn: React.CSSProperties = { padding: "3px 9px", fontSize: 10.5, fontWeight: 800, borderRadius: 999, border: `1px solid ${PURPLE}55`, background: "#fff", color: PURPLE, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" };
 const primaryBtn: React.CSSProperties = { padding: "7px 14px", fontSize: 12, fontWeight: 800, borderRadius: 8, border: "none", background: "linear-gradient(135deg, #6A178C 0%, #8B2FB5 100%)", color: "#fff", cursor: "pointer", fontFamily: "inherit" };
