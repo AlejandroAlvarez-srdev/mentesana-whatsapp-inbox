@@ -220,6 +220,13 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
     });
   }, []);
 
+  // Recarga solo las respuestas rápidas (tras crear una nueva desde el composer).
+  const reloadQuickReplies = () =>
+    fetch(`${apiBase}/quick-replies`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { quick_replies: [] }))
+      .then((q) => setQuickReplies(q.quick_replies ?? []))
+      .catch(() => {});
+
   // Cuando cambia la conversación, leer el número asignado (vía lead-profile) + ventana 24h
   useEffect(() => {
     if (!conversationId) { setAssignedNumber(null); setWindowInfo(null); return; }
@@ -816,6 +823,7 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
         onOpenTemplates={() => setTplOpen(true)}
         onOpenPropose={() => setProposeOpen(true)}
         quickReplies={quickReplies}
+        onCreatedQuickReply={reloadQuickReplies}
         onSendMedia={async (file, caption) => {
           if (!conversationId) return;
           const fd = new FormData();
@@ -893,9 +901,16 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   );
 }
 
-function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia, onOpenPropose }: { onSend: (text: string) => Promise<void>; onOpenTemplates: () => void; quickReplies: QuickReply[]; onSendMedia: (file: File, caption: string | null) => Promise<void>; onOpenPropose?: () => void }) {
+function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia, onOpenPropose, onCreatedQuickReply }: { onSend: (text: string) => Promise<void>; onOpenTemplates: () => void; quickReplies: QuickReply[]; onSendMedia: (file: File, caption: string | null) => Promise<void>; onOpenPropose?: () => void; onCreatedQuickReply?: () => void }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  // Crear respuesta rápida al vuelo (mini-modal)
+  const [newQrOpen, setNewQrOpen] = useState(false);
+  const [nqTitle, setNqTitle] = useState("");
+  const [nqShortcut, setNqShortcut] = useState("");
+  const [nqContent, setNqContent] = useState("");
+  const [nqSaving, setNqSaving] = useState(false);
+  const [nqErr, setNqErr] = useState<string | null>(null);
   const [qrOpen, setQrOpen] = useState(false);
   const [qrQuery, setQrQuery] = useState("");
   const [qrIdx, setQrIdx] = useState(0);
@@ -944,6 +959,29 @@ function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia, onOpenPr
     setQrOpen(false);
     setQrQuery("");
     inputRef.current?.focus();
+  }
+
+  // Abre el modal de nueva respuesta rápida, pre-rellenando el contenido con lo escrito.
+  function openNewQr() {
+    setNqContent(text.trim());
+    setNqTitle("");
+    setNqShortcut("");
+    setNqErr(null);
+    setNewQrOpen(true);
+  }
+  async function saveNewQr() {
+    if (!nqTitle.trim() || !nqContent.trim()) { setNqErr("Título y contenido son obligatorios."); return; }
+    setNqSaving(true); setNqErr(null);
+    try {
+      const r = await fetch("/api/admin/inbox-v2/quick-replies-crud", {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: nqTitle.trim(), content: nqContent.trim(), shortcut: nqShortcut.trim() || null, category: "general" }),
+      });
+      if (!r.ok) { setNqErr((await r.json().catch(() => ({}))).error ?? "Error al guardar"); return; }
+      setNewQrOpen(false);
+      setNqTitle(""); setNqShortcut(""); setNqContent("");
+      onCreatedQuickReply?.();
+    } finally { setNqSaving(false); }
   }
 
   async function handleSend() {
@@ -1042,6 +1080,11 @@ function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia, onOpenPr
           title="Plantillas Meta · individual o bulk"
           style={{ padding: "6px 10px", borderRadius: 7, border: `1px solid ${PURPLE}55`, background: `${PURPLE}0d`, color: PURPLE, cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}
         >📋 Plantillas</button>
+        <button
+          onClick={openNewQr}
+          title="Crear una respuesta rápida (queda disponible al instante con /)"
+          style={{ padding: "6px 10px", borderRadius: 7, border: `1px solid ${PURPLE}55`, background: `${PURPLE}0d`, color: PURPLE, cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}
+        >⚡ Nueva rápida</button>
         {onOpenPropose && (
           <button
             onClick={onOpenPropose}
@@ -1081,9 +1124,36 @@ function Composer({ onSend, onOpenTemplates, quickReplies, onSendMedia, onOpenPr
           {sending ? "Enviando…" : "Enviar →"}
         </button>
       </div>
+
+      {newQrOpen && (
+        <>
+          <div onClick={() => setNewQrOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200 }} />
+          <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: "min(460px,94vw)", background: "#fff", borderRadius: 14, zIndex: 201, boxShadow: "0 30px 80px rgba(0,0,0,0.3)", padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <strong style={{ fontSize: 15, color: "#1a1a2e" }}>⚡ Nueva respuesta rápida</strong>
+              <button onClick={() => setNewQrOpen(false)} style={{ background: "transparent", border: "none", fontSize: 22, cursor: "pointer", color: "#666" }}>×</button>
+            </div>
+            {nqErr && <div style={{ background: "#fef2f2", color: "#991b1b", borderRadius: 8, padding: "8px 10px", fontSize: 12, marginBottom: 10 }}>{nqErr}</div>}
+            <label style={qrLbl}>Título</label>
+            <input value={nqTitle} onChange={(e) => setNqTitle(e.target.value)} placeholder="Ej: Saludo inicial" style={qrFld} />
+            <label style={qrLbl}>Atajo <span style={{ fontWeight: 400, color: "#888" }}>(opcional · para invocar con /)</span></label>
+            <input value={nqShortcut} onChange={(e) => setNqShortcut(e.target.value.replace(/\s+/g, ""))} placeholder="Ej: hola" style={qrFld} />
+            <label style={qrLbl}>Contenido</label>
+            <textarea value={nqContent} onChange={(e) => setNqContent(e.target.value)} rows={5} placeholder="El texto que se enviará…" style={{ ...qrFld, resize: "vertical", fontFamily: "inherit" }} />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+              <button onClick={() => setNewQrOpen(false)} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.12)", background: "#fff", cursor: "pointer", fontSize: 12.5, fontWeight: 700 }}>Cancelar</button>
+              <button onClick={() => void saveNewQr()} disabled={nqSaving} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: PURPLE, color: "#fff", cursor: nqSaving ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, opacity: nqSaving ? 0.6 : 1 }}>{nqSaving ? "Guardando…" : "Guardar"}</button>
+            </div>
+            <p style={{ fontSize: 11, color: "#888", marginTop: 10, marginBottom: 0 }}>Quedará disponible al instante para todas escribiendo <code style={{ background: "rgba(106,23,140,0.08)", color: PURPLE, padding: "0 4px", borderRadius: 3 }}>/{nqShortcut || "atajo"}</code> en el chat.</p>
+          </div>
+        </>
+      )}
     </div>
   );
 }
+
+const qrLbl: React.CSSProperties = { display: "block", fontSize: 11.5, fontWeight: 700, color: "#475569", margin: "0 0 4px" };
+const qrFld: React.CSSProperties = { width: "100%", padding: "8px 10px", fontSize: 13, border: "1px solid rgba(0,0,0,0.14)", borderRadius: 8, marginBottom: 10, boxSizing: "border-box", outline: "none" };
 
 // Picker simple de emojis — botón 😀 que abre un panel con los más comunes.
 // Categorías priorizadas para atención al cliente (saludo, agradecimiento, énfasis, etc).
