@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import TemplatesModal from "./TemplatesModal";
 import ProposeAppointmentModal from "./ProposeAppointmentModal";
 import ChatExtrasMenu from "./ChatExtrasMenu";
@@ -107,25 +107,63 @@ export default function ChatPanel({ conversationId, onChanged, apiBase = "/api/a
   const [savingSale, setSavingSale] = useState(false);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [proposeOpen, setProposeOpen] = useState(false);
-  // Cache name → body extraído de meta-templates. El backend solo guarda content="[Template X]"
-  // como placeholder, así que aquí resolvemos el cuerpo real para mostrarlo en el chat.
-  const [templateBodies, setTemplateBodies] = useState<Record<string, string>>({});
+  // Cache templates SCOPED por WABA: cada número tiene sus templates propios
+  // aprobados en Meta con bodies distintos. Si guardamos un solo map global
+  // { [name]: body }, cuando dos WABAs tienen el mismo template_name pero
+  // bodies distintos (típico: templates aprobados independientemente en
+  // cada WABA), el último cargado pisa al otro y los mensajes de una
+  // conversación con WABA A muestran el body del template de WABA B.
+  //
+  // Fix: { [phone_number_id]: { [template_name]: body } }, y Bubble elige
+  // el body del WABA asignado a la conversación (assignedNumber).
+  //
+  // Fallback (rare): si el WABA cambió durante la conversación, buscamos en
+  // TODOS los caches y devolvemos el primer match (mejor que "cargando…"
+  // eterno). Cae bien porque en la práctica los templates aprobados en
+  // varios WABAs tienen el mismo body.
+  const [templateBodiesByWaba, setTemplateBodiesByWaba] = useState<Record<string, Record<string, string>>>({});
   // Segments / pipelines Amelia a los que pertenece el contacto (recurrente, paquete activo, etc.)
   const [ameliaSegments, setAmeliaSegments] = useState<string[]>([]);
   useEffect(() => {
-    fetch(`${apiBase}/meta-templates`, { credentials: "include" })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (!d?.templates) return;
+    if (waNumbers.length === 0) return;
+    let cancel = false;
+    Promise.all(waNumbers.map(async (n) => {
+      try {
+        const r = await fetch(`${apiBase}/meta-templates?phone_number_id=${encodeURIComponent(n.phone_number_id)}`, { credentials: "include" });
+        if (!r.ok) return { pid: n.phone_number_id, map: {} as Record<string, string> };
+        const d = await r.json();
         const map: Record<string, string> = {};
-        for (const t of d.templates) {
-          const body = (t.components ?? []).find((c: any) => c.type === "BODY")?.text;
+        for (const t of (d?.templates ?? [])) {
+          const body = (t.components ?? []).find((c: { type?: string; text?: string }) => c.type === "BODY")?.text;
           if (body) map[t.name] = body;
         }
-        setTemplateBodies(map);
-      })
-      .catch(() => {});
-  }, [apiBase]);
+        return { pid: n.phone_number_id, map };
+      } catch {
+        return { pid: n.phone_number_id, map: {} as Record<string, string> };
+      }
+    })).then((results) => {
+      if (cancel) return;
+      const byWaba: Record<string, Record<string, string>> = {};
+      for (const r of results) byWaba[r.pid] = r.map;
+      setTemplateBodiesByWaba(byWaba);
+    });
+    return () => { cancel = true; };
+  }, [apiBase, waNumbers]);
+
+  // Resolver body: primero el WABA asignado, luego cualquier otro (fallback)
+  const templateBodies = useMemo(() => {
+    const flat: Record<string, string> = {};
+    // Empezar con TODOS los WABAs para tener fallback global
+    for (const pid of Object.keys(templateBodiesByWaba)) {
+      Object.assign(flat, templateBodiesByWaba[pid] ?? {});
+    }
+    // El WABA asignado gana (se aplica último → sobreescribe)
+    const pid = assignedNumber?.phone_number_id;
+    if (pid && templateBodiesByWaba[pid]) {
+      Object.assign(flat, templateBodiesByWaba[pid]);
+    }
+    return flat;
+  }, [templateBodiesByWaba, assignedNumber?.phone_number_id]);
 
   const loadFull = useCallback(async () => {
     if (!conversationId) return;
