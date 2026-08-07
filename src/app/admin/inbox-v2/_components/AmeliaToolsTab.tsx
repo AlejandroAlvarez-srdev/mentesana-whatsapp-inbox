@@ -6,7 +6,7 @@ const PURPLE = "#6A178C";
 
 type PackageService = { id: number; service_id: number; service_name: string; provider_id: number; provider_name: string | null; sessions_in_package: number; used: number; remaining: number };
 type Package = { package_customer_id: number; package_id: number; name: string; status: string; start: string | null; end: string | null; bookings_count: number; services: PackageService[]; is_expired: boolean };
-type Appt = { appointment_id: number; booking_id: number; booking_start_utc: string; service_id: number | null; service_name: string | null; provider_id: number | null; provider_name: string | null; google_meet_url: string | null; booking_status: string; from_package: boolean; amelia_admin_url: string; reschedule_count: number };
+type Appt = { appointment_id: number; booking_id: number; booking_start_utc: string; service_id: number | null; service_name: string | null; provider_id: number | null; provider_name: string | null; google_meet_url: string | null; booking_status: string; from_package: boolean; amelia_admin_url: string; reschedule_count: number; program?: { slug: string; empresa: string; programa: string; emoji: string | null; colors: { bgSoft: string; border: string; text: string; badgeBg: string } } | null };
 type Past = { appointment_id: number; booking_id: number; booking_start_utc: string; service_name: string | null; provider_name: string | null; booking_status: string };
 type Resp = {
   customer: { id: number; name: string; email: string | null; phone: string | null } | null;
@@ -327,6 +327,10 @@ function ApptRow({ a, conversationId, onReschedule, onChangeProvider, onCancel }
   const [sendingMeet, setSendingMeet] = useState(false);
   const isDiag = a.service_id != null && DIAG_SERVICE_IDS.includes(a.service_id);
   const rescheduleLocked = isDiag && (a.reschedule_count ?? 0) >= 1;
+  // Cita B2B (Kairos, Integria, etc): fondo bgSoft de la empresa + borde
+  // izquierdo 4px con color de marca + badge pill junto al nombre.
+  const isB2B = !!a.program;
+  const p = a.program;
 
   async function sendMeetToChat() {
     if (!conversationId || !a.google_meet_url) return;
@@ -346,14 +350,21 @@ function ApptRow({ a, conversationId, onReschedule, onChangeProvider, onCancel }
   }
 
   return (
-    <div style={{ padding: 9, background: "#fff", borderRadius: 8, border: "1px solid rgba(0,0,0,0.06)", display: "grid", gap: 4 }}>
+    <div style={{ padding: 9, background: isB2B ? p!.colors.bgSoft : "#fff", borderRadius: 8, borderStyle: "solid", borderColor: isB2B ? p!.colors.border : "rgba(0,0,0,0.06)", borderWidth: isB2B ? "1px 1px 1px 4px" : "1px", display: "grid", gap: 4 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, flexWrap: "wrap" }}>
-        <strong style={{ fontSize: 12, color: PURPLE }}>{fmtMadrid(a.booking_start_utc)}</strong>
-        {a.from_package && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "rgba(16,185,129,0.14)", color: "#065f46", fontWeight: 800 }}>🎫 BONO</span>}
+        <strong style={{ fontSize: 12, color: isB2B ? p!.colors.text : PURPLE }}>{fmtMadrid(a.booking_start_utc)}</strong>
+        <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+          {isB2B && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 999, background: p!.colors.badgeBg, color: p!.colors.text, fontSize: 9.5, fontWeight: 800, letterSpacing: 0.3, textTransform: "uppercase" }}>
+              {p!.emoji ?? "🏢"} {p!.empresa}
+            </span>
+          )}
+          {a.from_package && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "rgba(16,185,129,0.14)", color: "#065f46", fontWeight: 800 }}>🎫 BONO</span>}
+        </div>
       </div>
-      <div style={{ fontSize: 11, color: "#1a1a2e" }}>
+      <div style={{ fontSize: 11, color: isB2B ? p!.colors.text : "#1a1a2e" }}>
         {a.provider_name && <span>👩‍⚕️ {a.provider_name}</span>}
-        {a.service_name && <span style={{ color: "#888" }}> · {a.service_name}</span>}
+        {a.service_name && <span style={{ color: isB2B ? p!.colors.text : "#888", opacity: isB2B ? 0.85 : 1 }}> · {isB2B ? `${p!.programa} · ${a.service_name}` : a.service_name}</span>}
       </div>
       {a.google_meet_url && (
         <a href={a.google_meet_url} target="_blank" rel="noreferrer" style={{ fontSize: 10.5, color: "#065f46", fontWeight: 700, textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
