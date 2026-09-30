@@ -51,6 +51,7 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
   const [scheduling, setScheduling] = useState<{ service: PackageService } | null>(null);
   const [rescheduling, setRescheduling] = useState<Appt | null>(null);
   const [changingProvider, setChangingProvider] = useState<Appt | null>(null);
+  const [offlineSale, setOfflineSale] = useState(false);
   const [adjusting, setAdjusting] = useState<{ p: Package; s: PackageService; sign: 1 | -1 } | null>(null);
   const [expiryEditing, setExpiryEditing] = useState<Package | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -113,10 +114,16 @@ export default function AmeliaToolsTab({ phone, email, conversationId }: { phone
       <section style={{ padding: 10, background: "rgba(106,23,140,0.04)", borderRadius: 10, border: `1px solid ${PURPLE}22` }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: PURPLE }}>👤 {c.name} <span style={{ fontSize: 10, color: "#888", marginLeft: 6, fontWeight: 600 }}>Amelia ID {c.id}</span></div>
         <div style={{ fontSize: 11, color: "#666", marginTop: 3 }}>{c.email} · {c.phone}</div>
-        <a href={data.amelia_admin_url + `#/customers/${c.id}`} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 6, fontSize: 11, color: PURPLE, fontWeight: 700, textDecoration: "none" }}>
-          🔗 Abrir en Amelia admin →
-        </a>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6, flexWrap: "wrap" }}>
+          <a href={data.amelia_admin_url + `#/customers/${c.id}`} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: PURPLE, fontWeight: 700, textDecoration: "none" }}>
+            🔗 Abrir en Amelia admin →
+          </a>
+          <button type="button" onClick={() => setOfflineSale(true)} style={expiryBtn} title="Cobro por Bizum, transferencia, teléfono o WhatsApp: se manda a Meta como compra para que la pauta optimice con ventas reales">
+            💶 Registrar venta offline
+          </button>
+        </div>
       </section>
+      {offlineSale && <OfflineSaleModal customer={c} conversationId={conversationId} onClose={() => setOfflineSale(false)} />}
 
       {/* Bonos */}
       <Section title={`🎫 Bonos · ${data.packages.length}`} subtitle={data.has_bono ? "Tiene sesiones disponibles" : "Sin sesiones restantes"}>
@@ -699,6 +706,101 @@ function AdjustSessionsModal({ p, s, sign, customerName, conversationId, onClose
         <button onClick={() => void submit()} disabled={!canSubmit} style={{ ...primaryBtn, opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "default" }}>
           {saving ? "Guardando…" : add ? `✅ Añadir ${qty} sesión(es)` : `✅ Quitar ${qty} sesión(es)`}
         </button>
+      </ModalFooter>
+    </ModalShell>
+  );
+}
+
+// Venta que NO pasa por Stripe (Bizum, transferencia, cobro en Amelia, cierre por
+// WhatsApp/teléfono). POST /api/agent/meta/offline-purchase → Purchase a Meta por CAPI
+// (+ rastro en analytics_events). Por defecto NO escribe en payments: eso es una
+// decisión explícita (casilla), porque toca la tabla financiera de los paneles.
+const PRODUCTOS_OFFLINE: { label: string; value: number }[] = [
+  { label: "Bono Felicidad (8 sesiones)", value: 229.99 },
+  { label: "Bono Compañía (4 sesiones)", value: 149.99 },
+  { label: "Bono Amor (pareja)", value: 179 },
+  { label: "Sesión individual", value: 50 },
+  { label: "Diagnóstico 9,99", value: 9.99 },
+  { label: "Otro", value: 0 },
+];
+const CANALES_OFFLINE: { id: string; label: string }[] = [
+  { id: "bizum", label: "Bizum" }, { id: "transfer", label: "Transferencia" }, { id: "whatsapp", label: "WhatsApp" },
+  { id: "phone", label: "Teléfono" }, { id: "amelia", label: "Cobro en Amelia" }, { id: "other", label: "Otro" },
+];
+function OfflineSaleModal({ customer, conversationId, onClose }: { customer: { id: number; name: string; email: string | null; phone: string | null }; conversationId: string | null; onClose: () => void }) {
+  const [producto, setProducto] = useState(PRODUCTOS_OFFLINE[0].label);
+  const [importe, setImporte] = useState(String(PRODUCTOS_OFFLINE[0].value));
+  const [canal, setCanal] = useState("bizum");
+  const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10));
+  const [referencia, setReferencia] = useState("");
+  const [enPayments, setEnPayments] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  const elegirProducto = (label: string) => {
+    setProducto(label);
+    const p = PRODUCTOS_OFFLINE.find((x) => x.label === label);
+    if (p && p.value > 0) setImporte(String(p.value));
+  };
+
+  const enviar = async () => {
+    const value = Number(String(importe).replace(",", "."));
+    if (!Number.isFinite(value) || value <= 0) { setResult({ ok: false, msg: "Importe inválido" }); return; }
+    setSaving(true); setResult(null);
+    try {
+      const r = await fetch("/api/agent/meta/offline-purchase", {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: customer.email, phone: customer.phone, name: customer.name,
+          value, product: producto, channel: canal, purchased_at: `${fecha}T12:00:00`,
+          referencia: referencia.trim() || undefined, registrar_en_payments: enPayments, conversation_id: conversationId,
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.ok) setResult({ ok: true, msg: `Enviado a Meta como compra de ${value.toFixed(2)} €${j.meta?.fecha_acotada_a_7d ? " (fecha ajustada: Meta solo admite 7 días atrás)" : ""}${j.payment_registered ? " · registrada en el panel" : ""}.` });
+      else setResult({ ok: false, msg: j.message || j.meta?.error || j.error || `Error ${r.status}` });
+    } catch (e) { setResult({ ok: false, msg: e instanceof Error ? e.message : String(e) }); }
+    finally { setSaving(false); }
+  };
+
+  const lbl: React.CSSProperties = { display: "block", fontSize: 10.5, fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 };
+  const inp: React.CSSProperties = { width: "100%", padding: "7px 9px", fontSize: 12.5, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 7, fontFamily: "inherit", boxSizing: "border-box" };
+  return (
+    <ModalShell title="💶 Registrar venta offline" subtitle={`${customer.name} · ${customer.email ?? "sin email"} · ${customer.phone ?? "sin teléfono"}`} onClose={onClose}>
+      {!customer.email && !customer.phone ? (
+        <div style={{ fontSize: 12, color: "#991b1b" }}>Este cliente no tiene email ni teléfono en Amelia: Meta no podría emparejar la compra. Complétalo en Amelia primero.</div>
+      ) : (
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <label><span style={lbl}>Producto</span>
+              <select value={producto} onChange={(e) => elegirProducto(e.target.value)} style={inp}>{PRODUCTOS_OFFLINE.map((p) => <option key={p.label} value={p.label}>{p.label}</option>)}</select>
+            </label>
+            <label><span style={lbl}>Importe cobrado (€)</span>
+              <input value={importe} onChange={(e) => setImporte(e.target.value)} inputMode="decimal" style={inp} />
+            </label>
+            <label><span style={lbl}>Canal de cobro</span>
+              <select value={canal} onChange={(e) => setCanal(e.target.value)} style={inp}>{CANALES_OFFLINE.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select>
+            </label>
+            <label><span style={lbl}>Fecha del cobro</span>
+              <input type="date" value={fecha} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setFecha(e.target.value)} style={inp} />
+            </label>
+          </div>
+          <label><span style={lbl}>Referencia (opcional · evita duplicados)</span>
+            <input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="nº de transferencia, id de Bizum…" style={inp} />
+          </label>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: "#475569", cursor: "pointer" }}>
+            <input type="checkbox" checked={enPayments} onChange={(e) => setEnPayments(e.target.checked)} style={{ marginTop: 2 }} />
+            <span>Contar también como <strong>venta</strong> en los paneles (Eficacia del traficker, CEO). Solo si este cobro no está ya en Stripe.</span>
+          </label>
+          <div style={{ fontSize: 11, color: "#666", lineHeight: 1.5, background: "rgba(106,23,140,0.04)", borderRadius: 8, padding: 10 }}>
+            Se envía a Meta como <strong>Purchase</strong> por Conversions API emparejando por email y teléfono. Meta acepta cobros de hasta 7 días atrás; más antiguos se registran con esa fecha límite.
+          </div>
+          {result && <div style={{ fontSize: 12, padding: 10, borderRadius: 8, background: result.ok ? "rgba(22,163,74,0.08)" : "rgba(220,38,38,0.08)", color: result.ok ? "#166534" : "#991b1b" }}>{result.ok ? "✅ " : "⚠️ "}{result.msg}</div>}
+        </div>
+      )}
+      <ModalFooter>
+        <button type="button" onClick={onClose} style={smallBtn(false)}>{result?.ok ? "Cerrar" : "Cancelar"}</button>
+        {!result?.ok && (customer.email || customer.phone) && <button type="button" onClick={enviar} disabled={saving} style={{ ...primaryBtn, opacity: saving ? 0.6 : 1 }}>{saving ? "Enviando…" : "Enviar a Meta"}</button>}
       </ModalFooter>
     </ModalShell>
   );
