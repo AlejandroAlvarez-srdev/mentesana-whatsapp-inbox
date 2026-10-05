@@ -5,6 +5,7 @@ import { ConvSummary } from "./ConversationList";
 import PipelinePanel from "@/app/agent/_components/PipelinePanel";
 import EmailSuggestModal from "./EmailSuggestModal";
 import AmeliaToolsTab from "./AmeliaToolsTab";
+import UpsellsTab from "./UpsellsTab";
 import LeadScoreBadge from "./LeadScoreBadge";
 import { fmtMadridDate } from "./_time";
 
@@ -39,7 +40,7 @@ type LeadProfile = {
 
 type TagMaster = { id: string; name: string; color: string; description: string | null };
 
-type Tab = "pipeline" | "insights" | "perfil" | "amelia";
+type Tab = "pipeline" | "insights" | "perfil" | "amelia" | "upsells";
 
 export default function InsightsPanel({
   conversationId,
@@ -213,6 +214,7 @@ export default function InsightsPanel({
         <TabBtn cur={tab} v="insights" set={setTab} label="🧠 Insights" />
         <TabBtn cur={tab} v="perfil" set={setTab} label="👤 Perfil" />
         <TabBtn cur={tab} v="amelia" set={setTab} label="🛠️ Amelia" />
+        <TabBtn cur={tab} v="upsells" set={setTab} label="💶 Upsells" />
       </div>
 
       <div style={{ overflowY: "auto", flex: 1, padding: 14 }}>
@@ -267,6 +269,13 @@ export default function InsightsPanel({
             onPatchField={patchField}
             loading={loading}
             onOpenEmailModal={() => setEmailModalOpen(true)}
+          />
+        )}
+
+        {tab === "upsells" && (
+          <UpsellsTab
+            phone={profile?.conversation?.phone ?? selectedSummary?.phone ?? null}
+            email={profile?.contact?.email ?? profile?.conversation?.email ?? null}
           />
         )}
 
