@@ -9,6 +9,7 @@ const PURPLE = "#6A178C";
 
 type Compra = { id: string; fecha: string; importe: number; key: string | null; nombre: string; grupo: string; email: string | null; source: string | null };
 type Oferta = { key: string; nombre: string; precioTexto: string; link: string | null; descripcion: string; grupo: string; prioridad?: number };
+type Ofrecido = { at: string; por: string | null; nota: string | null }; // check manual de ventas
 type Resp = {
   ok: boolean;
   lead: { email: string | null; phone: string | null; emails_pago: string[] };
@@ -20,6 +21,7 @@ type Resp = {
   total_gastado: number;
   ofrecer: Oferta[];
   resto: Oferta[];
+  ofrecidos: Record<string, Ofrecido>; // upsell_key → quién/cuándo lo ofreció
 };
 
 const SITUACION: Record<Resp["situacion"], { label: string; bg: string; fg: string }> = {
@@ -39,6 +41,8 @@ export default function UpsellsTab({ phone, email }: { phone: string | null; ema
   const leadKey = `${phone ?? ""}|${email ?? ""}`;
   const [state, setState] = useState<{ key: string; data: Resp | null; err: string | null }>({ key: "", data: null, err: null });
   const [verResto, setVerResto] = useState(false);
+  // Checks "ya se lo ofrecí": copia local para reflejar el cambio al instante (optimista).
+  const [ofrecidos, setOfrecidos] = useState<Record<string, Ofrecido>>({});
 
   useEffect(() => {
     if (!phone && !email) return;
@@ -48,10 +52,22 @@ export default function UpsellsTab({ phone, email }: { phone: string | null; ema
     if (email) qs.set("email", email);
     fetch(`/api/agent/upsells-status?${qs}`, { credentials: "include" })
       .then(async (r) => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `HTTP ${r.status}`); return r.json() as Promise<Resp>; })
-      .then((data) => { if (!cancelled) setState({ key: leadKey, data, err: null }); })
+      .then((data) => { if (!cancelled) { setState({ key: leadKey, data, err: null }); setOfrecidos(data?.ofrecidos ?? {}); } })
       .catch((e) => { if (!cancelled) setState({ key: leadKey, data: null, err: String(e.message ?? e) }); });
     return () => { cancelled = true; };
   }, [phone, email, leadKey]);
+
+  // Marca/desmarca un upsell como ofrecido. Optimista; si el POST falla, revierte.
+  const toggleOfrecido = async (key: string, next: boolean) => {
+    const prev = ofrecidos;
+    setOfrecidos((o) => { const c = { ...o }; if (next) c[key] = { at: new Date().toISOString(), por: "tú", nota: null }; else delete c[key]; return c; });
+    try {
+      const r = await fetch("/api/agent/upsells-status", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, email, upsell_key: key, ofrecido: next }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || String(r.status));
+      if (next) setOfrecidos((o) => ({ ...o, [key]: { at: j.ofrecido_at ?? new Date().toISOString(), por: j.por ?? null, nota: null } }));
+    } catch { setOfrecidos(prev); }
+  };
 
   if (!phone && !email) return <Empty>Selecciona una conversación.</Empty>;
   if (state.key !== leadKey) return <Empty>Cargando compras…</Empty>;
@@ -60,6 +76,7 @@ export default function UpsellsTab({ phone, email }: { phone: string | null; ema
   if (!data) return null;
 
   const sit = SITUACION[data.situacion];
+  const nOfrecidos = Object.keys(ofrecidos).length;
   return (
     <div style={{ display: "grid", gap: 14 }}>
       {/* Situación */}
@@ -78,10 +95,10 @@ export default function UpsellsTab({ phone, email }: { phone: string | null; ema
       </section>
 
       {/* Qué ofrecer */}
-      <Section title="💡 Qué ofrecerle ahora" subtitle="en orden de prioridad">
+      <Section title="💡 Qué ofrecerle ahora" subtitle={`en orden de prioridad${nOfrecidos ? ` · ${nOfrecidos} ofrecido${nOfrecidos === 1 ? "" : "s"}` : ""}`}>
         {data.ofrecer.length === 0 ? <div style={{ fontSize: 11, color: "#aaa" }}>Ya lo tiene todo comprado.</div> : (
           <div style={{ display: "grid", gap: 6 }}>
-            {data.ofrecer.map((o) => <OfertaCard key={o.key} o={o} destacada={o.prioridad === 1} />)}
+            {data.ofrecer.map((o) => <OfertaCard key={o.key} o={o} destacada={o.prioridad === 1} ofrecido={ofrecidos[o.key] ?? null} onToggle={(n) => toggleOfrecido(o.key, n)} />)}
           </div>
         )}
         {data.resto.length > 0 && (
@@ -89,7 +106,7 @@ export default function UpsellsTab({ phone, email }: { phone: string | null; ema
             {verResto ? "Ocultar" : `Ver ${data.resto.length} más`} {verResto ? "▴" : "▾"}
           </button>
         )}
-        {verResto && <div style={{ display: "grid", gap: 6, marginTop: 6 }}>{data.resto.map((o) => <OfertaCard key={o.key} o={o} />)}</div>}
+        {verResto && <div style={{ display: "grid", gap: 6, marginTop: 6 }}>{data.resto.map((o) => <OfertaCard key={o.key} o={o} ofrecido={ofrecidos[o.key] ?? null} onToggle={(n) => toggleOfrecido(o.key, n)} />)}</div>}
       </Section>
 
       {/* Ya compró */}
@@ -114,14 +131,14 @@ export default function UpsellsTab({ phone, email }: { phone: string | null; ema
   );
 }
 
-function OfertaCard({ o, destacada }: { o: Oferta; destacada?: boolean }) {
+function OfertaCard({ o, destacada, ofrecido, onToggle }: { o: Oferta; destacada?: boolean; ofrecido?: Ofrecido | null; onToggle?: (next: boolean) => void }) {
   const [copied, setCopied] = useState(false);
   const copiar = async () => {
     if (!o.link) return;
     try { await navigator.clipboard.writeText(o.link); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
   };
   return (
-    <div style={{ padding: 9, background: "#fff", borderRadius: 10, border: `1px solid ${destacada ? PURPLE + "66" : "rgba(0,0,0,0.07)"}`, boxShadow: destacada ? `0 2px 10px ${PURPLE}1a` : "none" }}>
+    <div style={{ padding: 9, background: ofrecido ? "#f0fdf4" : "#fff", borderRadius: 10, border: `1px solid ${ofrecido ? "#86efac" : destacada ? PURPLE + "66" : "rgba(0,0,0,0.07)"}`, boxShadow: destacada && !ofrecido ? `0 2px 10px ${PURPLE}1a` : "none" }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
         <strong style={{ fontSize: 12.5, color: "#1a1a2e" }}>{GRUPO_EMOJI[o.grupo] ?? "💳"} {o.nombre}</strong>
         <span style={{ fontSize: 12, fontWeight: 800, color: PURPLE, whiteSpace: "nowrap" }}>{o.precioTexto}</span>
@@ -137,6 +154,11 @@ function OfertaCard({ o, destacada }: { o: Oferta; destacada?: boolean }) {
           <span style={{ fontSize: 10.5, color: "#888" }}>Sin link fijo: usa 💳 “Generar link de pago” del chat con este importe.</span>
         )}
       </div>
+      {/* Check manual de ventas: persiste en upsell_ofrecidos (quién y cuándo) */}
+      <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 7, fontSize: 11, fontWeight: ofrecido ? 700 : 500, color: ofrecido ? "#047857" : "#666", cursor: "pointer", userSelect: "none" }}>
+        <input type="checkbox" checked={!!ofrecido} onChange={(e) => onToggle?.(e.target.checked)} style={{ accentColor: "#047857", width: 14, height: 14, margin: 0, cursor: "pointer" }} />
+        {ofrecido ? <>✓ Ofrecido · {ofrecido.por ?? "ventas"} · {fecha(ofrecido.at)}</> : "Marcar como ofrecido"}
+      </label>
     </div>
   );
 }
