@@ -105,6 +105,12 @@ async function listConversations(url: URL) {
   const assignedTo = url.searchParams.get('assigned_to');
   const phoneNumberId = url.searchParams.get('phone_number_id');
   const hasInsight = url.searchParams.get('hasInsight') === 'true';
+  // Filtro por fecha/hora del ÚLTIMO mensaje recibido (in_from/in_to) y/o enviado (out_from/out_to),
+  // en ISO. Los ids los resuelve la RPC conversations_last_msg_filter y se acota con .in('id').
+  const dateIso = (k: string) => { const v = (url.searchParams.get(k) ?? '').trim(); return v && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null; };
+  const inFrom = dateIso('in_from'), inTo = dateIso('in_to'), outFrom = dateIso('out_from'), outTo = dateIso('out_to');
+  const hasDateFilter = !!(inFrom || inTo || outFrom || outTo);
+  const lastMsg = new Map<string, { last_inbound_at: string | null; last_outbound_at: string | null }>();
   const limit = Math.min(500, Math.max(5, Number(url.searchParams.get('limit') ?? 30)));
   const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0));
   let q = sb.from('conversations_mentesana').select('id, phone, lead_name, source, pipeline_type, client_type, status, purchase_status, paid_at, purchase_amount, assigned_to, assigned_psychologist_name, last_message_time, last_message, unread_count, created_at', { count: 'exact' });
@@ -115,15 +121,40 @@ async function listConversations(url: URL) {
   if (paidOnly) q = q.or('purchase_status.eq.pagado,paid_at.not.is.null,status.eq.pagado');
   if (unreadOnly) q = q.gt('unread_count', 0);
   if (search) q = q.or(`lead_name.ilike.%${search}%,phone.ilike.%${search}%,last_message.ilike.%${search}%`);
-  q = q.order('last_message_time', { ascending: false, nullsFirst: false }).range(offset, offset + limit - 1);
+  const dateIds: string[] = []; let dateTotal = 0;
+  if (hasDateFilter) {
+    // La página la decide la RPC (ids ordenados por último mensaje + total_count) → .in('id') corto.
+    const { data: dr, error: de } = await sb.rpc('conversations_last_msg_filter', { p_in_from: inFrom, p_in_to: inTo, p_out_from: outFrom, p_out_to: outTo, p_days: 365, p_limit: limit, p_offset: offset });
+    if (de) return json({ error: de.message }, 500);
+    for (const r of (dr ?? []) as any[]) { dateIds.push(r.conversation_id); lastMsg.set(r.conversation_id, { last_inbound_at: r.last_inbound_at ?? null, last_outbound_at: r.last_outbound_at ?? null }); dateTotal = Number(r.total_count) || 0; }
+    if (dateIds.length === 0) return json({ conversations: [], total: dateTotal, limit, offset });
+    q = q.in('id', dateIds);
+  }
+  q = q.order('last_message_time', { ascending: false, nullsFirst: false });
+  q = hasDateFilter ? q.limit(limit) : q.range(offset, offset + limit - 1);
   const { data, error, count } = await q;
   if (error) return json({ error: error.message }, 500);
   let filtered = data ?? [];
+  if (hasDateFilter) { // orden de la RPC + marcas ↙/↗
+    const pos = new Map(dateIds.map((id, i) => [id, i]));
+    filtered = filtered.map((c: any) => ({ ...c, ...(lastMsg.get(c.id) ?? {}) })).sort((a: any, b: any) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0));
+  }
   if (phoneNumberId && filtered.length > 0) {
     const ids = filtered.map((c: any) => c.id);
     const { data: routes } = await sb.from('conversation_routing').select('conversation_id').eq('phone_number_id', phoneNumberId).in('conversation_id', ids);
     const set = new Set((routes ?? []).map((r: any) => r.conversation_id));
     filtered = filtered.filter((c: any) => set.has(c.id));
+  }
+  // Números de otra operación (hoy: Empresas B2B, metadata.scope='empresas'). Sus conversaciones tienen su propio
+  // CRM y no deben aparecer en esta bandeja. Si se pide un número concreto, se respeta lo pedido.
+  if (!phoneNumberId && filtered.length > 0) {
+    const ajenos = await numerosDeOtroCrm();
+    if (ajenos.length > 0) {
+      const ids = filtered.map((c: any) => c.id);
+      const { data: routes } = await sb.from('conversation_routing').select('conversation_id').in('phone_number_id', ajenos).in('conversation_id', ids);
+      const fuera = new Set((routes ?? []).map((r: any) => r.conversation_id));
+      if (fuera.size > 0) filtered = filtered.filter((c: any) => !fuera.has(c.id));
+    }
   }
   if (hasInsight && filtered.length > 0) {
     const ids = filtered.map((c: any) => c.id);
@@ -131,7 +162,21 @@ async function listConversations(url: URL) {
     const set = new Set((insightIds ?? []).map((i: any) => i.conversation_id));
     filtered = filtered.filter((c: any) => set.has(c.id));
   }
-  return json({ conversations: filtered, total: count, limit, offset });
+  return json({ conversations: filtered, total: hasDateFilter ? dateTotal : count, limit, offset });
+}
+
+// phone_number_id de los números que pertenecen a otro CRM (metadata.scope distinto de B2C). Se cachea 5 min.
+let _ajenos: { ids: string[]; at: number } | null = null;
+async function numerosDeOtroCrm(): Promise<string[]> {
+  if (_ajenos && Date.now() - _ajenos.at < 300000) return _ajenos.ids;
+  try {
+    const { data } = await sb.from('whatsapp_numbers').select('phone_number_id, metadata');
+    const ids = (data ?? []).filter((n: any) => n?.metadata?.scope && n.metadata.scope !== 'b2c').map((n: any) => String(n.phone_number_id));
+    _ajenos = { ids, at: Date.now() };
+    return ids;
+  } catch {
+    return _ajenos?.ids ?? [];
+  }
 }
 
 async function listContacts(url: URL) {
@@ -682,7 +727,7 @@ Deno.serve(async (req: Request) => {
   const method = req.method;
   if (method === 'OPTIONS') return new Response(null, { headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS', 'access-control-allow-headers': 'authorization, content-type, x-inbox-secret' } });
   try {
-    if (method === 'GET' && path === '/') { const nums = await loadWaNumbers().catch(() => []); return json({ ok: true, service: 'inbox-v2-server', version: 'v18', mm_lite_routing: true, wa_numbers: nums.length, wa_default: nums.find((n) => n.is_default)?.name ?? null, models: { fast: MODEL_FAST, rich: MODEL_RICH, embed: EMBED_MODEL } }); }
+    if (method === 'GET' && path === '/') { const nums = await loadWaNumbers().catch(() => []); return json({ ok: true, service: 'inbox-v2-server', version: 'v20', mm_lite_routing: true, wa_numbers: nums.length, wa_default: nums.find((n) => n.is_default)?.name ?? null, models: { fast: MODEL_FAST, rich: MODEL_RICH, embed: EMBED_MODEL } }); }
     const auth = checkSecret(req); if (auth) return auth;
     if (method === 'GET' && path === '/brain') return await brain(url);
     if (method === 'GET' && path === '/agents') return await listAgents();

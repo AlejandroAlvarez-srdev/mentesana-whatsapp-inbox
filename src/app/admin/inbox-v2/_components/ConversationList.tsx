@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useConversationsRealtime } from "../_hooks/useInboxRealtime";
-import { parseUtc } from "./_time";
+import { parseUtc, fmtMadridDateTime } from "./_time";
 
 const PURPLE = "#6A178C";
 
@@ -21,9 +21,19 @@ export type ConvSummary = {
   last_message: string | null;
   unread_count: number | null;
   created_at: string | null;
+  last_inbound_at?: string | null; // solo con filtro de fechas: último mensaje recibido
+  last_outbound_at?: string | null; // idem: último enviado
 };
 
 type Mode = "list" | "search";
+type DateFilter = { inFrom: string; inTo: string; outFrom: string; outTo: string };
+// datetime-local (hora local del navegador) → ISO UTC para el backend. Vacío → se omite.
+function dateParams(f: DateFilter): [string, string][] {
+  const out: [string, string][] = [];
+  const pairs: [string, string][] = [["in_from", f.inFrom], ["in_to", f.inTo], ["out_from", f.outFrom], ["out_to", f.outTo]];
+  for (const [k, v] of pairs) { if (!v) continue; const d = new Date(v); if (!Number.isNaN(d.getTime())) out.push([k, d.toISOString()]); }
+  return out;
+}
 
 export default function ConversationList({
   selectedId,
@@ -51,6 +61,10 @@ export default function ConversationList({
   const [expiringOnly, setExpiringOnly] = useState(initialFilter === "expiring");
   const [expiredOnly, setExpiredOnly] = useState(initialFilter === "expired");
   const [mineOnly, setMineOnly] = useState(false);
+  // Filtro por fecha/hora del último mensaje recibido / enviado (RPC conversations_last_msg_filter).
+  const [dateOpen, setDateOpen] = useState(false);
+  const [dateF, setDateF] = useState<DateFilter>({ inFrom: "", inTo: "", outFrom: "", outTo: "" });
+  const dateActive = !!(dateF.inFrom || dateF.inTo || dateF.outFrom || dateF.outTo);
   // Si el agente tiene scope (ventas/soporte) ocultamos los pills Ventas/Soporte porque el
   // backend YA fuerza el filtro automáticamente. Mostrarlos confunde y daba 0 resultados.
   const [agentScope, setAgentScope] = useState<"ventas" | "soporte" | null>(null);
@@ -132,6 +146,7 @@ export default function ConversationList({
       if (expiringOnly) params.set("window_status", "expiring_soon");
       if (expiredOnly) params.set("window_status", "expired");
       if (mineOnly) params.set("mine", "true");
+      for (const [k, v] of dateParams(dateF)) params.set(k, v);
       // Usamos endpoint propio /api/agent/inbox-list para filtros que el Edge Function no soporta
       // (window_status, mine). Para el listado normal seguimos en el proxy si es /agent (más rápido,
       // tiene caches), pero si es admin/inbox-v2 también. Solo redirigimos cuando hace falta.
@@ -163,7 +178,7 @@ export default function ConversationList({
     debounceRef.current = window.setTimeout(() => { void loadList(query); }, 250);
     return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, pipelineFilter, numberFilter, unreadOnly, expiringOnly, expiredOnly, mineOnly]);
+  }, [query, pipelineFilter, numberFilter, unreadOnly, expiringOnly, expiredOnly, mineOnly, dateF]);
 
   // Infinite scroll: cuando el sentinel entra en viewport, carga la siguiente página
   useEffect(() => {
@@ -204,6 +219,7 @@ export default function ConversationList({
       if (expiringOnly) params.set("window_status", "expiring_soon");
       if (expiredOnly) params.set("window_status", "expired");
       if (mineOnly) params.set("mine", "true");
+      for (const [k, v] of dateParams(dateF)) params.set(k, v);
       const needsCustom = (expiringOnly || expiredOnly || mineOnly) && apiBase === "/api/agent/inbox";
       const endpoint = needsCustom ? `/api/agent/inbox-list?${params}` : `${apiBase}/conversations?${params}`;
       const r = await fetch(endpoint, { credentials: "include", signal: ac.signal });
@@ -366,10 +382,35 @@ export default function ConversationList({
           >
             🔒 Cerradas
           </button>
+          <button
+            type="button"
+            onClick={() => setDateOpen((v) => !v)}
+            style={{
+              padding: "3px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6, border: "none", cursor: "pointer",
+              background: dateActive ? "#0e7490" : "rgba(14,116,144,0.12)",
+              color: dateActive ? "#fff" : "#155e75",
+            }}
+            title="Filtrar por fecha y hora del último mensaje recibido o enviado"
+          >
+            📅 Fechas{dateActive ? " ·" : ""}
+          </button>
           <span style={{ marginLeft: "auto", fontSize: 11, color: "#888" }}>
             {loading && items.length === 0 ? "…" : `${items.length}${total ? ` / ${total.toLocaleString()}` : ""}`}
           </span>
         </div>
+        {dateOpen && (
+          <div style={{ marginTop: 6, padding: 8, border: "1px solid rgba(14,116,144,0.25)", borderRadius: 8, background: "rgba(14,116,144,0.05)", display: "grid", gap: 6, fontSize: 11 }}>
+            <DateRow label="↙ Último recibido" from={dateF.inFrom} to={dateF.inTo} onFrom={(v) => setDateF((f) => ({ ...f, inFrom: v }))} onTo={(v) => setDateF((f) => ({ ...f, inTo: v }))} />
+            <DateRow label="↗ Último enviado" from={dateF.outFrom} to={dateF.outTo} onFrom={(v) => setDateF((f) => ({ ...f, outFrom: v }))} onTo={(v) => setDateF((f) => ({ ...f, outTo: v }))} />
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <QuickDate label="Hoy" days={0} onPick={(a, b) => setDateF((f) => ({ ...f, inFrom: a, inTo: b }))} />
+              <QuickDate label="Ayer" days={1} onPick={(a, b) => setDateF((f) => ({ ...f, inFrom: a, inTo: b }))} />
+              <QuickDate label="Últimos 7 días" days={7} onPick={(a, b) => setDateF((f) => ({ ...f, inFrom: a, inTo: b }))} />
+              <span style={{ color: "#888" }}>atajos → recibido</span>
+              <button type="button" onClick={() => setDateF({ inFrom: "", inTo: "", outFrom: "", outTo: "" })} style={{ marginLeft: "auto", padding: "3px 8px", fontSize: 11, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 6, background: "#fff", cursor: "pointer", fontFamily: "inherit" }}>Limpiar</button>
+            </div>
+          </div>
+        )}
         {waNumbers.length > 1 && (
           <select
             value={numberFilter}
@@ -594,6 +635,12 @@ function ConvRow({ c, selected, onClick, bulkMode = false, checked = false, onTo
         >
           {c.last_message ?? "—"}
         </div>
+        {(c.last_inbound_at || c.last_outbound_at) && (
+          <div style={{ fontSize: 10, color: "#155e75", marginBottom: 3, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {c.last_inbound_at && <span title="Último mensaje recibido">↙ {fmtMadridDateTime(c.last_inbound_at)}</span>}
+            {c.last_outbound_at && <span title="Último mensaje enviado">↗ {fmtMadridDateTime(c.last_outbound_at)}</span>}
+          </div>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           {isPaid && <Chip color={PURPLE} solid>€ PAGÓ</Chip>}
           {c.status === "nuevo" && <Chip color="#2563eb">NUEVO</Chip>}
@@ -640,6 +687,31 @@ function colorFromString(s: string): string {
 }
 
 // Hora siempre en horario España (Europe/Madrid) — nunca "ahora" / "now"
+// Fila "desde → hasta" con datetime-local (hora local del navegador).
+function DateRow({ label, from, to, onFrom, onTo }: { label: string; from: string; to: string; onFrom: (v: string) => void; onTo: (v: string) => void }) {
+  const inp: React.CSSProperties = { padding: "3px 6px", fontSize: 11, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 6, background: "#fff", fontFamily: "inherit" };
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+      <span style={{ width: 112, fontWeight: 700, color: "#155e75" }}>{label}</span>
+      <input type="datetime-local" value={from} onChange={(e) => onFrom(e.target.value)} style={inp} title="desde" />
+      <span style={{ color: "#888" }}>→</span>
+      <input type="datetime-local" value={to} onChange={(e) => onTo(e.target.value)} style={inp} title="hasta" />
+    </div>
+  );
+}
+// Atajos: días=0 hoy, 1 ayer (día completo local); N>1 → desde hace N días hasta ahora.
+function QuickDate({ label, days, onPick }: { label: string; days: number; onPick: (from: string, to: string) => void }) {
+  const pick = () => {
+    const p = (n: number) => String(n).padStart(2, "0");
+    const toLocal = (d: Date) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    const now = new Date();
+    const d0 = new Date(now); d0.setDate(now.getDate() - days); d0.setHours(0, 0, 0, 0);
+    if (days <= 1) { const d1 = new Date(d0); d1.setHours(23, 59, 0, 0); onPick(toLocal(d0), toLocal(d1)); }
+    else onPick(toLocal(d0), toLocal(now));
+  };
+  return <button type="button" onClick={pick} style={{ padding: "3px 8px", fontSize: 11, border: "1px solid rgba(14,116,144,0.3)", borderRadius: 6, background: "#fff", color: "#155e75", cursor: "pointer", fontFamily: "inherit" }}>{label}</button>;
+}
+
 function fmtRel(iso: string): string {
   const d = parseUtc(iso);
   const now = new Date();
