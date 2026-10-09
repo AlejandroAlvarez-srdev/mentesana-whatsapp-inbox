@@ -26,8 +26,28 @@ export type ConvSummary = {
 };
 
 type Mode = "list" | "search";
-type DateFilter = { inFrom: string; inTo: string; outFrom: string; outTo: string };
-// datetime-local (hora local del navegador) → ISO UTC para el backend. Vacío → se omite.
+type DateFilter = { inFrom: string; inTo: string; outFrom: string; outTo: string }; // aplicado (ISO UTC)
+// Lo que escribe el agente: fecha + hora opcional, desde → hasta, para recibido (in) y enviado (out).
+type DateDraft = { inFromD: string; inFromT: string; inToD: string; inToT: string; outFromD: string; outFromT: string; outToD: string; outToT: string };
+const EMPTY_DRAFT: DateDraft = { inFromD: "", inFromT: "", inToD: "", inToT: "", outFromD: "", outFromT: "", outToD: "", outToT: "" };
+const EMPTY_FILTER: DateFilter = { inFrom: "", inTo: "", outFrom: "", outTo: "" };
+// Multipropósito: una sola fecha → ese día completo (00:00–23:59); dos fechas → rango; hora opcional
+// (sin hora: inicio/fin del día); fechas invertidas → se ordenan. Hora local del navegador → ISO UTC.
+function rangeFrom(dFrom: string, tFrom: string, dTo: string, tTo: string): { from: string; to: string } {
+  if (!dFrom && !dTo) return { from: "", to: "" };
+  let a = dFrom || dTo, b = dTo || dFrom;
+  if (b < a) [a, b] = [b, a];
+  const from = new Date(`${a}T${tFrom || "00:00"}:00`);
+  const to = new Date(`${b}T${tTo || "23:59"}:59`);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return { from: "", to: "" };
+  return { from: from.toISOString(), to: to.toISOString() };
+}
+function applyDraft(d: DateDraft): DateFilter {
+  const i = rangeFrom(d.inFromD, d.inFromT, d.inToD, d.inToT);
+  const o = rangeFrom(d.outFromD, d.outFromT, d.outToD, d.outToT);
+  return { inFrom: i.from, inTo: i.to, outFrom: o.from, outTo: o.to };
+}
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 function dateParams(f: DateFilter): [string, string][] {
   const out: [string, string][] = [];
   const pairs: [string, string][] = [["in_from", f.inFrom], ["in_to", f.inTo], ["out_from", f.outFrom], ["out_to", f.outTo]];
@@ -63,8 +83,11 @@ export default function ConversationList({
   const [mineOnly, setMineOnly] = useState(false);
   // Filtro por fecha/hora del último mensaje recibido / enviado (RPC conversations_last_msg_filter).
   const [dateOpen, setDateOpen] = useState(false);
-  const [dateF, setDateF] = useState<DateFilter>({ inFrom: "", inTo: "", outFrom: "", outTo: "" });
+  const [dateDraft, setDateDraft] = useState<DateDraft>(EMPTY_DRAFT); // lo que escribe el agente
+  const [dateF, setDateF] = useState<DateFilter>(EMPTY_FILTER);       // lo aplicado con "Filtrar"
   const dateActive = !!(dateF.inFrom || dateF.inTo || dateF.outFrom || dateF.outTo);
+  const applyDates = (d: DateDraft = dateDraft) => { setDateDraft(d); setDateF(applyDraft(d)); };
+  const clearDates = () => { setDateDraft(EMPTY_DRAFT); setDateF(EMPTY_FILTER); };
   // Si el agente tiene scope (ventas/soporte) ocultamos los pills Ventas/Soporte porque el
   // backend YA fuerza el filtro automáticamente. Mostrarlos confunde y daba 0 resultados.
   const [agentScope, setAgentScope] = useState<"ventas" | "soporte" | null>(null);
@@ -400,14 +423,15 @@ export default function ConversationList({
         </div>
         {dateOpen && (
           <div style={{ marginTop: 6, padding: 8, border: "1px solid rgba(14,116,144,0.25)", borderRadius: 8, background: "rgba(14,116,144,0.05)", display: "grid", gap: 6, fontSize: 11 }}>
-            <DateRow label="↙ Último recibido" from={dateF.inFrom} to={dateF.inTo} onFrom={(v) => setDateF((f) => ({ ...f, inFrom: v }))} onTo={(v) => setDateF((f) => ({ ...f, inTo: v }))} />
-            <DateRow label="↗ Último enviado" from={dateF.outFrom} to={dateF.outTo} onFrom={(v) => setDateF((f) => ({ ...f, outFrom: v }))} onTo={(v) => setDateF((f) => ({ ...f, outTo: v }))} />
+            <DateRow label="↙ Último recibido" prefix="in" draft={dateDraft} setDraft={setDateDraft} onEnter={() => applyDates()} />
+            <DateRow label="↗ Último enviado" prefix="out" draft={dateDraft} setDraft={setDateDraft} onEnter={() => applyDates()} />
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-              <QuickDate label="Hoy" days={0} onPick={(a, b) => setDateF((f) => ({ ...f, inFrom: a, inTo: b }))} />
-              <QuickDate label="Ayer" days={1} onPick={(a, b) => setDateF((f) => ({ ...f, inFrom: a, inTo: b }))} />
-              <QuickDate label="Últimos 7 días" days={7} onPick={(a, b) => setDateF((f) => ({ ...f, inFrom: a, inTo: b }))} />
-              <span style={{ color: "#888" }}>atajos → recibido</span>
-              <button type="button" onClick={() => setDateF({ inFrom: "", inTo: "", outFrom: "", outTo: "" })} style={{ marginLeft: "auto", padding: "3px 8px", fontSize: 11, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 6, background: "#fff", cursor: "pointer", fontFamily: "inherit" }}>Limpiar</button>
+              <QuickDate label="Hoy" days={0} onPick={(a, b) => applyDates({ ...dateDraft, inFromD: a, inFromT: "", inToD: b, inToT: "" })} />
+              <QuickDate label="Ayer" days={1} onPick={(a, b) => applyDates({ ...dateDraft, inFromD: a, inFromT: "", inToD: b, inToT: "" })} />
+              <QuickDate label="Últimos 7 días" days={7} onPick={(a, b) => applyDates({ ...dateDraft, inFromD: a, inFromT: "", inToD: b, inToT: "" })} />
+              <span style={{ color: "#888" }}>una sola fecha = ese día · hora opcional</span>
+              <button type="button" onClick={clearDates} style={{ marginLeft: "auto", padding: "4px 10px", fontSize: 11, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 6, background: "#fff", cursor: "pointer", fontFamily: "inherit" }}>Limpiar</button>
+              <button type="button" onClick={() => applyDates()} style={{ padding: "4px 12px", fontSize: 11, fontWeight: 700, border: "none", borderRadius: 6, background: "#0e7490", color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>Filtrar</button>
             </div>
           </div>
         )}
@@ -687,27 +711,29 @@ function colorFromString(s: string): string {
 }
 
 // Hora siempre en horario España (Europe/Madrid) — nunca "ahora" / "now"
-// Fila "desde → hasta" con datetime-local (hora local del navegador).
-function DateRow({ label, from, to, onFrom, onTo }: { label: string; from: string; to: string; onFrom: (v: string) => void; onTo: (v: string) => void }) {
+// Fila "desde → hasta": fecha + hora opcional (hora local del navegador). Enter aplica.
+function DateRow({ label, prefix, draft, setDraft, onEnter }: { label: string; prefix: "in" | "out"; draft: DateDraft; setDraft: React.Dispatch<React.SetStateAction<DateDraft>>; onEnter: () => void }) {
   const inp: React.CSSProperties = { padding: "3px 6px", fontSize: 11, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 6, background: "#fff", fontFamily: "inherit" };
+  const key = (k: "FromD" | "FromT" | "ToD" | "ToT") => `${prefix}${k}` as keyof DateDraft;
+  const upd = (k: keyof DateDraft) => (e: React.ChangeEvent<HTMLInputElement>) => setDraft((d) => ({ ...d, [k]: e.target.value }));
+  const onKey = (e: React.KeyboardEvent) => { if (e.key === "Enter") onEnter(); };
   return (
     <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
       <span style={{ width: 112, fontWeight: 700, color: "#155e75" }}>{label}</span>
-      <input type="datetime-local" value={from} onChange={(e) => onFrom(e.target.value)} style={inp} title="desde" />
+      <input type="date" value={draft[key("FromD")]} onChange={upd(key("FromD"))} onKeyDown={onKey} style={inp} title="desde (fecha)" />
+      <input type="time" value={draft[key("FromT")]} onChange={upd(key("FromT"))} onKeyDown={onKey} style={{ ...inp, width: 84 }} title="desde (hora, opcional)" />
       <span style={{ color: "#888" }}>→</span>
-      <input type="datetime-local" value={to} onChange={(e) => onTo(e.target.value)} style={inp} title="hasta" />
+      <input type="date" value={draft[key("ToD")]} onChange={upd(key("ToD"))} onKeyDown={onKey} style={inp} title="hasta (fecha, opcional)" />
+      <input type="time" value={draft[key("ToT")]} onChange={upd(key("ToT"))} onKeyDown={onKey} style={{ ...inp, width: 84 }} title="hasta (hora, opcional)" />
     </div>
   );
 }
-// Atajos: días=0 hoy, 1 ayer (día completo local); N>1 → desde hace N días hasta ahora.
-function QuickDate({ label, days, onPick }: { label: string; days: number; onPick: (from: string, to: string) => void }) {
+// Atajos (aplican al instante sobre "recibido"): días=0 hoy, 1 ayer, N>1 → desde hace N días hasta hoy.
+function QuickDate({ label, days, onPick }: { label: string; days: number; onPick: (fromD: string, toD: string) => void }) {
   const pick = () => {
-    const p = (n: number) => String(n).padStart(2, "0");
-    const toLocal = (d: Date) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
     const now = new Date();
-    const d0 = new Date(now); d0.setDate(now.getDate() - days); d0.setHours(0, 0, 0, 0);
-    if (days <= 1) { const d1 = new Date(d0); d1.setHours(23, 59, 0, 0); onPick(toLocal(d0), toLocal(d1)); }
-    else onPick(toLocal(d0), toLocal(now));
+    const d0 = new Date(now); d0.setDate(now.getDate() - days);
+    onPick(ymd(d0), days <= 1 ? ymd(d0) : ymd(now));
   };
   return <button type="button" onClick={pick} style={{ padding: "3px 8px", fontSize: 11, border: "1px solid rgba(14,116,144,0.3)", borderRadius: 6, background: "#fff", color: "#155e75", cursor: "pointer", fontFamily: "inherit" }}>{label}</button>;
 }
