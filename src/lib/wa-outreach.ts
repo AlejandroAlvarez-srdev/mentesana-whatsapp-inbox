@@ -147,8 +147,12 @@ export function buildComponents(meta: MetaTemplateMeta, firstName: string | null
   return comps;
 }
 
-export async function buildWaOutreachPlan(opts: { blog: SupabaseClient; app?: SupabaseClient | null; nowMs?: number; cfg?: OutreachConfig }): Promise<WaPlan> {
+// crossChannelCooldown=false: el margen de 3 días solo cuenta lo enviado por WhatsApp (se ignoran los envíos y
+// mensajes del equipo por la app) — para pasadas manuales "quiero que WhatsApp salga hoy aunque ya recibieron la app".
+// rules: limita la pasada a esas reglas. perNumberLimit: tope por número solo para esta pasada.
+export async function buildWaOutreachPlan(opts: { blog: SupabaseClient; app?: SupabaseClient | null; nowMs?: number; cfg?: OutreachConfig; crossChannelCooldown?: boolean; rules?: OutreachRule[]; perNumberLimit?: number }): Promise<WaPlan> {
   const { blog } = opts;
+  const cross = opts.crossChannelCooldown !== false;
   const cfg = opts.cfg ?? OUTREACH_CONFIG;
   const nowMs = opts.nowMs ?? Date.now();
   const [config, numbersAll, mapRows, base] = await Promise.all([loadWaConfig(blog), loadWaNumbers(blog), loadWaTemplateMap(blog), loadBaseSnapshots({ blog, nowMs, cfg })]);
@@ -160,9 +164,11 @@ export async function buildWaOutreachPlan(opts: { blog: SupabaseClient; app?: Su
 
   let sig: WaSignals = { throttled: new Map(), metaOptOut: new Set(), lastOutTemplate: new Map() };
   if (base.ameliaOk) {
-    if (opts.app) { try { await applyAppSignals({ base, app: opts.app, nowMs, cfg }); } catch (e) { warnings.push("App (cooldown cruzado) no disponible: " + (e instanceof Error ? e.message : String(e))); } }
+    if (opts.app && cross) { try { await applyAppSignals({ base, app: opts.app, nowMs, cfg }); } catch (e) { warnings.push("App (cooldown cruzado) no disponible: " + (e instanceof Error ? e.message : String(e))); } }
     sig = await applyWaSignals({ base, blog, nowMs, cfg, full: true });
   }
+  if (!cross) warnings.push("Pasada sin margen cruzado: se ignoran los envíos de la app de los últimos 3 días (solo cuenta WhatsApp).");
+  const cap = Math.max(1, Math.min(1000, opts.perNumberLimit ?? config.daily_limit_per_number));
 
   // Uso de plantillas 7 días (rotación) y envíos de hoy por número (tope), ambos de nuestro log + messages_mentesana.
   const todayKey = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(nowMs));
@@ -192,8 +198,11 @@ export async function buildWaOutreachPlan(opts: { blog: SupabaseClient; app?: Su
       if (seenPhones.has(s.phone)) { skip(s, "mismo teléfono que otro paciente ya planificado"); continue; }
       const thr = sig.throttled.get(s.phone);
       if (thr != null) { skip(s, `Meta limitó los mensajes a este número hace ${Math.floor((nowMs - thr) / DAY)} días (healthy ecosystem / spam rate)`); continue; }
-      const d = decideRule(s, nowMs, cfg, "wa");
+      // Sin margen cruzado: para decidir solo cuentan los envíos por WhatsApp (el remark conserva su canal).
+      const sDecide = cross ? s : { ...s, outreach: s.outreach.filter((o) => o.channel === "wa" || o.rule === "remark") };
+      const d = decideRule(sDecide, nowMs, cfg, "wa");
       if (!isDecision(d)) { skip(s, d.skip, d.rule); continue; }
+      if (opts.rules && !opts.rules.includes(d.rule)) { skip(s, `regla "${RULE_LABEL[d.rule]}" fuera de esta pasada`, d.rule); continue; }
       const restantes = d.rule === "renovacion" ? Math.min(2, d.bono?.remaining ?? 0) : null;
       // Número: conversación ya enrutada a un habilitado → ese; si no, el menos cargado hoy. Debe tener plantilla.
       const route = routing.get(s.phone);
@@ -202,7 +211,7 @@ export async function buildWaOutreachPlan(opts: { blog: SupabaseClient; app?: Su
       let chosen: { n: WaNumber; pick: NonNullable<ReturnType<typeof pickTemplate>> } | null = null;
       let topeAlcanzado = false;
       for (const n of ordenNumeros) {
-        if (load(n.phone_number_id) >= config.daily_limit_per_number) { topeAlcanzado = true; continue; }
+        if (load(n.phone_number_id) >= cap) { topeAlcanzado = true; continue; }
         const pick = pickTemplate({ rows: mapRows.filter((r) => r.waba_id === n.waba_id), approved: byWaba.get(n.waba_id) ?? new Map(), usage, rule: d.rule, step: d.step, restantes });
         if (pick) { chosen = { n, pick }; break; }
       }
@@ -256,20 +265,31 @@ async function loadRouting(blog: SupabaseClient, phones: string[]): Promise<Map<
 
 // ─── Envío: programar en whatsapp_scheduled_templates_v2 y registrar en el log ─
 
-export type WaRunResult = { batch_id: string; total: number; scheduled: number; failed: number; scheduled_for: string; rows: Array<{ from_number: string; template_name: string; recipients: number; scheduled_id: string | null; error?: string }> };
+export type WaRunResult = { batch_id: string; total: number; scheduled: number; failed: number; scheduled_for: string; last_scheduled_for: string; rows: Array<{ from_number: string; template_name: string; recipients: number; scheduled_for: string; scheduled_id: string | null; error?: string }> };
 
-export async function runWaOutreach(opts: { candidates: WaCandidate[]; blog: SupabaseClient; createdBy: string; source: "panel" | "cron"; delayMinutes?: number; batchId?: string }): Promise<WaRunResult> {
+// spread: trocea cada grupo (número × plantilla) en lotes de chunkSize y los escalona cada intervalMinutes
+// ("suave": en vez de 300 de golpe, 20 cada 8 minutos durante dos horas).
+export async function runWaOutreach(opts: { candidates: WaCandidate[]; blog: SupabaseClient; createdBy: string; source: "panel" | "cron"; delayMinutes?: number; batchId?: string; spread?: { chunkSize: number; intervalMinutes: number } }): Promise<WaRunResult> {
   const { candidates, blog } = opts;
   const batchId = opts.batchId ?? `wa_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const delay = opts.delayMinutes ?? 5;
-  const scheduledFor = new Date(Date.now() + delay * 60_000).toISOString();
+  const baseMs = Date.now() + delay * 60_000;
+  const scheduledFor = new Date(baseMs).toISOString();
   const groups = new Map<string, WaCandidate[]>();
   for (const c of candidates) { const k = `${c.from_number_id}|${c.template_name}|${c.language}`; const l = groups.get(k) ?? []; l.push(c); groups.set(k, l); }
+  const chunkSize = Math.max(1, opts.spread?.chunkSize ?? Number.MAX_SAFE_INTEGER);
+  const chunks: WaCandidate[][] = [];
+  for (const [, list] of groups) for (let i = 0; i < list.length; i += chunkSize) chunks.push(list.slice(i, i + chunkSize));
   const rows: WaRunResult["rows"] = [];
   const logRows: Array<Record<string, unknown>> = [];
   let scheduled = 0, failed = 0;
-  for (const [, list] of groups) {
+  let lastScheduledFor = scheduledFor;
+  for (let k = 0; k < chunks.length; k++) {
+    const list = chunks[k];
     const first = list[0];
+    const whenMs = baseMs + (opts.spread ? k * opts.spread.intervalMinutes * 60_000 : 0);
+    const when = new Date(whenMs).toISOString();
+    if (whenMs > Date.parse(lastScheduledFor)) lastScheduledFor = when;
     const porRegla = Object.entries(list.reduce<Record<string, number>>((acc, c) => { const k = c.rule_label + (c.step ? ` ${c.step}` : ""); acc[k] = (acc[k] ?? 0) + 1; return acc; }, {})).map(([k, n]) => `${k}: ${n}`).join(" · ");
     const { data, error } = await blog.from("whatsapp_scheduled_templates_v2").insert({
       created_by: opts.createdBy,
@@ -281,11 +301,11 @@ export async function runWaOutreach(opts: { candidates: WaCandidate[]; blog: Sup
       conversation_id: null,
       phones: null,
       recipients: list.map((c) => ({ phone: c.phone, components: c.components })),
-      scheduled_for: scheduledFor,
-      notes: `🤖 Automático WhatsApp (${opts.source}) · ${porRegla} · lote ${batchId}`.slice(0, 500),
+      scheduled_for: when,
+      notes: `🤖 Automático WhatsApp (${opts.source}) · ${porRegla} · lote ${batchId}${opts.spread ? ` · tramo ${k + 1}/${chunks.length}` : ""}`.slice(0, 500),
     }).select("id").single();
     const scheduledId = data?.id != null ? String(data.id) : null;
-    rows.push({ from_number: first.from_number_name, template_name: first.template_name, recipients: list.length, scheduled_id: scheduledId, error: error?.message });
+    rows.push({ from_number: first.from_number_name, template_name: first.template_name, recipients: list.length, scheduled_for: when, scheduled_id: scheduledId, error: error?.message });
     if (error) failed += list.length; else scheduled += list.length;
     for (const c of list) {
       logRows.push({
@@ -293,7 +313,7 @@ export async function runWaOutreach(opts: { candidates: WaCandidate[]; blog: Sup
         template_slug: c.template_name, template_title: `${c.template_name} (${c.language})`, body: c.preview,
         batch_id: batchId, wa_conversation_id: c.context.conversation_id, scheduled_id: scheduledId, ok: !error, error: error?.message ?? null,
         agent_email: opts.createdBy, agent_name: opts.createdBy, source: opts.source,
-        context: { reason: c.reason, ...c.context, from_number: c.from_number_id, from_number_name: c.from_number_name, waba_id: c.waba_id, scheduled_for: scheduledFor },
+        context: { reason: c.reason, ...c.context, from_number: c.from_number_id, from_number_name: c.from_number_name, waba_id: c.waba_id, scheduled_for: when },
       });
     }
   }
@@ -301,7 +321,7 @@ export async function runWaOutreach(opts: { candidates: WaCandidate[]; blog: Sup
     const { error } = await blog.from("app_outreach_log").insert(logRows);
     if (error) console.warn("[wa-outreach] log failed:", error.message);
   }
-  return { batch_id: batchId, total: candidates.length, scheduled, failed, scheduled_for: scheduledFor, rows };
+  return { batch_id: batchId, total: candidates.length, scheduled, failed, scheduled_for: scheduledFor, last_scheduled_for: lastScheduledFor, rows };
 }
 
 export const waChannelLabel = CHANNEL_LABEL.wa;
