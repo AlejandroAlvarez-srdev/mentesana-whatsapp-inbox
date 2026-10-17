@@ -1,4 +1,4 @@
-// inbox-v2-server v18 — routing MM Lite: templates MARKETING → /marketing_messages, resto → /messages
+// inbox-v2-server v21 — routing MM Lite: templates MARKETING → /marketing_messages (fallback a /messages si el número no está en MM Lite), resto → /messages
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 
 function cleanKey(v: string | undefined): string | undefined { if (!v) return v; return v.replace(/[^\x20-\x7E]/g, '').trim(); }
@@ -410,14 +410,22 @@ async function metaSendTemplate(num: WaNumber, toPhone: string, templateName: st
   // REDACTED_ID (Mente Sana Soporte, +34 XXX XXX XXX,
   // WABA REDACTED_ID). Los anteriores REDACTED_ID y
   // REDACTED_ID (WABA REDACTED_ID) están BANNED desde 2026-05-29.
+  // v21: si el número NO está onboardeado a MM Lite (Meta responde 133010 "Account not registered" o
+  // "Unsupported post request"), se reintenta por el endpoint clásico /messages, que acepta MARKETING igual.
   const category = await fetchTemplateCategory(num, templateName, lang);
   const isMarketing = (category ?? '').toUpperCase() === 'MARKETING';
-  const path = isMarketing ? 'marketing_messages' : 'messages';
-  const url = `${WHATSAPP_API}/${num.phone_number_id}/${path}`;
   const body: any = { messaging_product: 'whatsapp', to: toPhone, type: 'template', template: { name: templateName, language: { code: lang } } };
   if (components && components.length > 0) body.template.components = components;
-  const res = await fetch(url, { method: 'POST', headers: { 'Authorization': `Bearer ${num.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  if (!res.ok) throw new Error(`Meta ${res.status} (${isMarketing ? 'MM_LITE' : 'CLOUD'}): ${(await res.text()).slice(0, 500)}`);
+  const post = (path: string) => fetch(`${WHATSAPP_API}/${num.phone_number_id}/${path}`, { method: 'POST', headers: { 'Authorization': `Bearer ${num.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  let via = isMarketing ? 'MM_LITE' : 'CLOUD';
+  let res = await post(isMarketing ? 'marketing_messages' : 'messages');
+  if (!res.ok && isMarketing) {
+    const txt = await res.text();
+    if (!/133010|Account not registered|Unsupported post request/i.test(txt)) throw new Error(`Meta ${res.status} (MM_LITE): ${txt.slice(0, 500)}`);
+    via = 'CLOUD tras MM_LITE';
+    res = await post('messages');
+  }
+  if (!res.ok) throw new Error(`Meta ${res.status} (${via}): ${(await res.text()).slice(0, 500)}`);
   const j = await res.json();
   return { wamid: j.messages?.[0]?.id ?? '' };
 }
@@ -727,7 +735,7 @@ Deno.serve(async (req: Request) => {
   const method = req.method;
   if (method === 'OPTIONS') return new Response(null, { headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS', 'access-control-allow-headers': 'authorization, content-type, x-inbox-secret' } });
   try {
-    if (method === 'GET' && path === '/') { const nums = await loadWaNumbers().catch(() => []); return json({ ok: true, service: 'inbox-v2-server', version: 'v20', mm_lite_routing: true, wa_numbers: nums.length, wa_default: nums.find((n) => n.is_default)?.name ?? null, models: { fast: MODEL_FAST, rich: MODEL_RICH, embed: EMBED_MODEL } }); }
+    if (method === 'GET' && path === '/') { const nums = await loadWaNumbers().catch(() => []); return json({ ok: true, service: 'inbox-v2-server', version: 'v21', mm_lite_routing: true, mm_lite_fallback_cloud: true, wa_numbers: nums.length, wa_default: nums.find((n) => n.is_default)?.name ?? null, models: { fast: MODEL_FAST, rich: MODEL_RICH, embed: EMBED_MODEL } }); }
     const auth = checkSecret(req); if (auth) return auth;
     if (method === 'GET' && path === '/brain') return await brain(url);
     if (method === 'GET' && path === '/agents') return await listAgents();
