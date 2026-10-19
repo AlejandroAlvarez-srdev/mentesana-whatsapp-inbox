@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import TemplateCreator from "./TemplateCreator";
 
 const PURPLE = "#6A178C";
 
@@ -23,7 +24,7 @@ type MetaTemplate = {
 
 type WaNumber = { phone_number_id: string; name: string; phone_number: string | null; is_default: boolean; status: string; is_pdf_number: boolean; business_account_id?: string | null };
 type ConversationLite = { id: string; phone: string; lead_name: string | null };
-type Mode = "single" | "bulk";
+type Mode = "single" | "bulk" | "create";
 
 type BulkResult = {
   ok: boolean;
@@ -437,32 +438,34 @@ export default function TemplatesModal({
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, padding: "16px 20px", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a2e" }}>📋 Plantillas WhatsApp</h2>
           <span style={{ fontSize: 12, color: "#888" }}>{templates.filter((t) => t.status === "APPROVED").length} aprobadas · {numbers.length} números</span>
-          <a href="/admin/inbox-v2/templates" style={{ fontSize: 12, fontWeight: 700, color: "#6A178C", textDecoration: "none" }}>+ Crear nueva →</a>
           <button onClick={onClose} style={{ marginLeft: "auto", border: "none", background: "transparent", fontSize: 22, cursor: "pointer", color: "#888" }}>×</button>
         </div>
 
         <div style={{ display: "flex", gap: 4, padding: "10px 20px 0", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
           <TabBtn cur={mode} v="single" set={setMode} label={conversation ? `Esta conversación · ${conversation.lead_name?.trim() || conversation.phone}` : "Una conversación"} disabled={!conversation} />
           <TabBtn cur={mode} v="bulk" set={setMode} label="📣 Envío masivo (bulk)" />
+          <TabBtn cur={mode} v="create" set={setMode} label="✏️ Crear nueva" />
         </div>
 
-        {/* Número origen + idioma + errores */}
-        <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 20px", borderBottom: "1px solid rgba(0,0,0,0.04)", background: "#fafafa", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 11, color: "#888", fontWeight: 700 }}>ENVIAR DESDE:</span>
-          <select value={fromNumberId} onChange={(e) => { setFromNumberId(e.target.value); setSelected(null); }} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(0,0,0,0.1)", fontSize: 12.5, background: "#fff", minWidth: 280 }}>
-            {numbers.length === 0 && <option value="">(sin números)</option>}
-            {numbers.map((n) => (
-              <option key={n.phone_number_id} value={n.phone_number_id}>
-                {n.name?.trim()}{n.phone_number ? ` · ${n.phone_number}` : ""}{n.is_default ? " · default" : ""}
-              </option>
-            ))}
-          </select>
-          {templateErrors.length > 0 && (
-            <span title={templateErrors.join("\n")} style={{ fontSize: 11, color: "#dc2626", fontWeight: 600, cursor: "help" }}>
-              ⚠️ {templateErrors.length} WABA{templateErrors.length === 1 ? "" : "s"} con token expirado
-            </span>
-          )}
-        </div>
+        {/* Número origen + idioma + errores (no aplica al crear) */}
+        {mode !== "create" && (
+          <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 20px", borderBottom: "1px solid rgba(0,0,0,0.04)", background: "#fafafa", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "#888", fontWeight: 700 }}>ENVIAR DESDE:</span>
+            <select value={fromNumberId} onChange={(e) => { setFromNumberId(e.target.value); setSelected(null); }} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid rgba(0,0,0,0.1)", fontSize: 12.5, background: "#fff", minWidth: 280 }}>
+              {numbers.length === 0 && <option value="">(sin números)</option>}
+              {numbers.map((n) => (
+                <option key={n.phone_number_id} value={n.phone_number_id}>
+                  {n.name?.trim()}{n.phone_number ? ` · ${n.phone_number}` : ""}{n.is_default ? " · default" : ""}
+                </option>
+              ))}
+            </select>
+            {templateErrors.length > 0 && (
+              <span title={templateErrors.join("\n")} style={{ fontSize: 11, color: "#dc2626", fontWeight: 600, cursor: "help" }}>
+                ⚠️ {templateErrors.length} WABA{templateErrors.length === 1 ? "" : "s"} con token expirado
+              </span>
+            )}
+          </div>
+        )}
 
         {loadErr && <div style={errBox}>{loadErr}</div>}
 
@@ -473,8 +476,15 @@ export default function TemplatesModal({
           </div>
         )}
 
+        {/* ✏️ Crear nueva: el creador de plantillas aquí mismo, con la sesión de agente (sin saltar a /admin) */}
+        {mode === "create" && (
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "14px 20px" }}>
+            <TemplateCreator defaultPhoneNumberId={fromNumberId} />
+          </div>
+        )}
+
         {/* Body 3 columns: left = list, middle = preview, right = actions */}
-        <div style={{ display: "grid", gridTemplateColumns: "320px 1fr 360px", gap: 0, flex: 1, minHeight: 0 }}>
+        <div style={{ display: mode === "create" ? "none" : "grid", gridTemplateColumns: "320px 1fr 360px", gap: 0, flex: 1, minHeight: 0 }}>
           {/* LEFT — list */}
           <div style={{ borderRight: "1px solid rgba(0,0,0,0.06)", padding: 14, overflowY: "auto", minHeight: 0 }}>
             <div style={{ fontSize: 11, color: "#888", fontWeight: 700, marginBottom: 8 }}>1. ELEGIR PLANTILLA</div>
