@@ -437,6 +437,7 @@ export default function TemplatesModal({
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, padding: "16px 20px", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1a1a2e" }}>📋 Plantillas WhatsApp</h2>
           <span style={{ fontSize: 12, color: "#888" }}>{templates.filter((t) => t.status === "APPROVED").length} aprobadas · {numbers.length} números</span>
+          <a href="/admin/inbox-v2/templates" style={{ fontSize: 12, fontWeight: 700, color: "#6A178C", textDecoration: "none" }}>+ Crear nueva →</a>
           <button onClick={onClose} style={{ marginLeft: "auto", border: "none", background: "transparent", fontSize: 22, cursor: "pointer", color: "#888" }}>×</button>
         </div>
 

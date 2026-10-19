@@ -84,6 +84,7 @@ export default function InboxV2Page() {
         <nav style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
           <PillLink href="/admin/inbox-v2/expiring" tone="amber">⏰ Por cerrar</PillLink>
           <PillLink href="/admin/inbox-v2/scheduled" tone="ghost">📅 Programadas</PillLink>
+          <PillLink href="/admin/inbox-v2/templates" tone="ghost">📝 Plantillas</PillLink>
           <PillLink href="/admin/inbox-v2/health" tone="ghost">🩺 Salud</PillLink>
           <PillLink href="/admin/inbox-v2/numbers" tone="ghost">📱 Números</PillLink>
           {!isMobile && <PillLink href="/admin/inbox-v2/settings" tone="ghost">⚙️</PillLink>}
