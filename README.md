@@ -5,9 +5,14 @@
 <h1 align="center">inbox-v2 — a multi-agent WhatsApp Business inbox, built around a legacy monolith without touching it</h1>
 <!-- /header -->
 
+## Latest (Nov 2026)
+
+**A send guard for bulk template campaigns** — `src/lib/wa-send-guard.ts` (+ tests). After Meta banned our sending numbers for marketing volume, I found the quality monitor only throttled the legacy monolith while the new scheduler kept sending with numbers in YELLOW/RED. Every bulk batch now passes three checks before it reaches Meta: the number must be GREEN and not paused, a per-number daily cap (overflow is postponed to 10:00 Madrid next day, DST-aware) and opted-out phones are stripped. Lesson written into code: a quality signal nobody enforces is just a dashboard.
+
+
 A production CRM inbox where sales and support agents work every WhatsApp conversation of an online psychology clinic from one place: multiple numbers, routing, pipelines, templates, scheduled sends and automated outreach. Built incrementally with a strangler-fig pattern so the legacy system kept running the whole time.
 
-> Extracted from the private monorepo of **Mente Sana**, an online psychology clinic in Spain (8,000+ patients, 150+ licensed psychologists). 110 commits of real history, May–Oct 2026. Author: Alejandro Álvarez (CTO).
+> Extracted from the private monorepo of **Mente Sana**, an online psychology clinic in Spain (8,000+ patients, 150+ licensed psychologists). 108 commits of real history, May–Nov 2026. Author: Alejandro Álvarez (CTO).
 
 ---
 
