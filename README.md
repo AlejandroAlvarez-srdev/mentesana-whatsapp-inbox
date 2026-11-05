@@ -7,6 +7,8 @@
 
 ## Latest (Nov 2026)
 
+**Multi-agent reply drafts for the inbox** — `src/lib/inbox-agent/` (+ tests and an eval set). A rules-first supervisor classifies intent (sales, rescheduling, app support, complaint, clinical risk) and only calls a small model when the rules are unsure; a specialist model then drafts a reply from read-only context. Guardrails sanitize the draft (no invented phone numbers or emails, no secrets, brand wording rules) and on any sign of clinical risk there is **no draft at all** — only an alert and an "escalate to a person" action. Agents always review and send by hand; every draft is logged. Ships behind a feature flag. The eval set is 16 invented messages; the offline run checks that every rules-only case is resolved without an LLM call.
+
 **A send guard for bulk template campaigns** — `src/lib/wa-send-guard.ts` (+ tests). After Meta banned our sending numbers for marketing volume, I found the quality monitor only throttled the legacy monolith while the new scheduler kept sending with numbers in YELLOW/RED. Every bulk batch now passes three checks before it reaches Meta: the number must be GREEN and not paused, a per-number daily cap (overflow is postponed to 10:00 Madrid next day, DST-aware) and opted-out phones are stripped. Lesson written into code: a quality signal nobody enforces is just a dashboard.
 
 
