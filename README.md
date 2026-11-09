@@ -9,6 +9,10 @@
 
 **Multi-agent reply drafts for the inbox** — `src/lib/inbox-agent/` (+ tests and an eval set). A rules-first supervisor classifies intent (sales, rescheduling, app support, complaint, clinical risk) and only calls a small model when the rules are unsure; a specialist model then drafts a reply from read-only context. Guardrails sanitize the draft (no invented phone numbers or emails, no secrets, brand wording rules) and on any sign of clinical risk there is **no draft at all** — only an alert and an "escalate to a person" action. Agents always review and send by hand; every draft is logged. Ships behind a feature flag. The eval set is 16 invented messages; the offline run checks that every rules-only case is resolved without an LLM call.
 
+**Post-mortem: four WhatsApp accounts banned in three days** — [`docs/postmortem-2026-11-whatsapp-bans.md`](docs/postmortem-2026-11-whatsapp-bans.md). A blameless write-up: the timeline, five root causes (including a "we changed our number" broadcast that read as ban evasion), what held up and the rules we run by now.
+
+**Meta webhooks drive opt-outs and template health** — `src/app/api/whatsapp/meta-events/route.ts`, `src/lib/wa-meta-events.ts` (+ tests). WhatsApp's own stop/resume preferences become opt-outs, keyed by phone and by business-scoped user ID and safe against out-of-order retries. Template quality, status and category changes are stored and sent as email alerts. The sender refuses batches whose template is RED or paused.
+
 **A send guard for bulk template campaigns** — `src/lib/wa-send-guard.ts` (+ tests). After Meta banned our sending numbers for marketing volume, I found the quality monitor only throttled the legacy monolith while the new scheduler kept sending with numbers in YELLOW/RED. Every bulk batch now passes three checks before it reaches Meta: the number must be GREEN and not paused, a per-number daily cap (overflow is postponed to 10:00 Madrid next day, DST-aware) and opted-out phones are stripped. Lesson written into code: a quality signal nobody enforces is just a dashboard.
 
 
@@ -156,9 +160,11 @@ flowchart LR
 Unit tests (Vitest) cover the pure logic that is easiest to get wrong against Meta's rules:
 
 - `src/lib/wa-template-builder.test.ts` — name normalisation, validation (examples per variable, consecutive variables, banned words, header/footer/button limits, warning when the body ends in a variable), component/payload building, preview filling and Meta error translation.
+- `src/lib/wa-send-guard.test.ts` — quality gate, daily cap and next-morning postponement (DST-aware), opt-out stripping by phone and BSUID, template health blocking.
+- `src/lib/wa-meta-events.test.ts` — parsing of preference and template webhooks, opt-out rows, alert dedupe.
 - `src/lib/wa-outreach.test.ts` — template rotation (least-used version, filtering out non-approved / inactive / RED / unsupported templates, step- and remaining-session-specific versions) and component building with first-name fallback.
 
-Route handlers and UI were verified against production data; they are not covered by automated tests in this extract.
+Run with `npx vitest run` (`vitest.config.ts` maps the `@/` alias). Route handlers and UI were verified against production data; they are not covered by automated tests in this extract.
 
 ## Stack
 
