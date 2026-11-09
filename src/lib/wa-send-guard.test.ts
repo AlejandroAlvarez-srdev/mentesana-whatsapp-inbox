@@ -1,5 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { dailyCap, dropOptedOut, madridMidnightIso, qualityBlock, recipientCount, tomorrowMadrid10Iso } from "./wa-send-guard";
+import { dailyCap, dropOptedOut, madridMidnightIso, optoutKey, qualityBlock, recipientCount, templateBlock, tomorrowMadrid10Iso } from "./wa-send-guard";
+
+describe("bajas por BSUID", () => {
+  it("optoutKey: teléfonos por dígitos, BSUID tal cual en mayúsculas", () => {
+    expect(optoutKey("+34 600 111 222")).toBe("34600111222");
+    expect(optoutKey(" us.1349 ")).toBe("US.1349");
+    expect(optoutKey(null)).toBe("");
+  });
+  it("quita destinatarios guardados con BSUID y no cruza sus dígitos con un teléfono", () => {
+    const out = new Set(["US.1349", "34600111222"]);
+    const r = dropOptedOut({ recipients: [{ phone: "US.1349" }, { phone: "1349" }, { phone: "+34600111222" }] }, out);
+    expect(r.recipients).toEqual([{ phone: "1349" }]);
+    expect(r.removed).toBe(2);
+  });
+});
+
+describe("templateBlock", () => {
+  const h = [
+    { template_name: "renov", language: "es", quality: "GREEN", status: "APPROVED" },
+    { template_name: "renov", language: "en", quality: "RED", status: "APPROVED" },
+    { template_name: "promo", language: "es", quality: "YELLOW", status: "paused" },
+  ];
+  it("frena PAUSED/DISABLED/FLAGGED y RED", () => {
+    expect(templateBlock(h, "promo", "es")).toBe("plantilla PAUSED");
+    expect(templateBlock(h, "renov", "en")).toBe("plantilla RED");
+    expect(templateBlock([{ template_name: "x", status: "FLAGGED" }], "x")).toBe("plantilla FLAGGED");
+  });
+  it("con filas del mismo idioma ignora las de otros idiomas", () => {
+    expect(templateBlock(h, "renov", "es")).toBeNull();
+  });
+  it("sin idioma coincidente mira todas; sin datos no frena", () => {
+    expect(templateBlock(h, "renov", "pt_BR")).toBe("plantilla RED");
+    expect(templateBlock(h, "otra", "es")).toBeNull();
+    expect(templateBlock([], "renov")).toBeNull();
+    expect(templateBlock([{ template_name: "y", quality: "YELLOW" }], "y")).toBeNull();
+  });
+});
 
 describe("qualityBlock", () => {
   it("deja salir GREEN y UNKNOWN", () => {
