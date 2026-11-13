@@ -7,6 +7,15 @@
 
 ## Latest (Nov 2026)
 
+**Templates as code: a compliance linter, variant rotation and a sync planner** — `src/lib/wa-template-policy.ts`, `wa-template-rotation.ts`, `wa-template-sync.ts` (+ 29 tests). After the bans we rebuilt the whole template catalogue on a new account, and I turned what we had been checking by eye into three pure modules:
+
+- **Policy linter.** The existing builder answers "will Meta accept this?"; the linter answers "should we send it?". Marketing must name the sender and carry both an opt-out footer and the quick-reply button that records the opt-out; a utility template may not contain promotion (Meta reclassifies it and counts it against you); copy may not attribute a health condition to the recipient ("are you still struggling with anxiety?") while naming the service is fine; no promised outcomes; link buttons only to allow-listed hosts, with look-alike domains rejected. Urgency wording and shouting are warnings, not errors. Every rule maps to something that was actually sent.
+- **Near-duplicate detection.** Agents asked for five wordings of each message. Changing the greeting is not a new wording, so the catalogue check compares bodies by Jaccard similarity over word bigrams and flags pairs that are the same text in disguise.
+- **Variant rotation.** Given a family (`renovacion_1…5`) and what a contact has already received, it proposes a variant the contact has not seen, or the least recently seen one, using only approved and healthy variants. It returns nothing for opted-out contacts or inside a marketing cool-down, and says when to retry. The choice is deterministic, so two agents opening the same chat see the same suggestion, and the spread across variants is tested over 5,000 contacts.
+- **Sync planner.** Diffs the catalogue in the repo against the account and returns a plan without touching anything: `create`, `unchanged`, `drift`, `blocked` (the linter said no) and `orphan` (made by hand in Meta's UI). Meta will not let you edit a template under review, so drift proposes a versioned name instead of an update.
+
+These are a library with tests; they are not wired into the production panel yet. The honest caveat is written at the top of the rotation module: varying the wording stops a message looking pasted, but what gets a number flagged is who you write to and how often.
+
 **Multi-agent reply drafts for the inbox** — `src/lib/inbox-agent/` (+ tests and an eval set). A rules-first supervisor classifies intent (sales, rescheduling, app support, complaint, clinical risk) and only calls a small model when the rules are unsure; a specialist model then drafts a reply from read-only context. Guardrails sanitize the draft (no invented phone numbers or emails, no secrets, brand wording rules) and on any sign of clinical risk there is **no draft at all** — only an alert and an "escalate to a person" action. Agents always review and send by hand; every draft is logged. Ships behind a feature flag. The eval set is 16 invented messages; the offline run checks that every rules-only case is resolved without an LLM call.
 
 **Post-mortem: four WhatsApp accounts banned in three days** — [`docs/postmortem-2026-11-whatsapp-bans.md`](docs/postmortem-2026-11-whatsapp-bans.md). A blameless write-up: the timeline, five root causes (including a "we changed our number" broadcast that read as ban evasion), what held up and the rules we run by now.
@@ -153,6 +162,9 @@ flowchart LR
 | `src/app/admin/inbox-v2/_components/AmeliaToolsTab.tsx` · `UpsellsTab.tsx` | Booking-system and upsell tools inside the chat. |
 | `src/app/admin/inbox-v2/_hooks/useInboxRealtime.ts` | Supabase Realtime subscriptions. |
 | `src/lib/wa-template-builder.ts` | Pure validation and Meta payload builder for new templates. |
+| `src/lib/wa-template-policy.ts` | Compliance linter (sender identification, opt-out, category, health assumptions, promised outcomes, link hosts) and near-duplicate detection across a catalogue. |
+| `src/lib/wa-template-rotation.ts` | Per-contact variant rotation with opt-out and marketing cool-down; deterministic tie-break. |
+| `src/lib/wa-template-sync.ts` | Catalogue-vs-account diff that plans creates, flags drift and orphans, and never edits in place. |
 | `src/lib/wa-outreach.ts` | Outreach planner and runner (template rotation, number choice, scheduling). |
 
 ## Testing
@@ -160,6 +172,9 @@ flowchart LR
 Unit tests (Vitest) cover the pure logic that is easiest to get wrong against Meta's rules:
 
 - `src/lib/wa-template-builder.test.ts` — name normalisation, validation (examples per variable, consecutive variables, banned words, header/footer/button limits, warning when the body ends in a variable), component/payload building, preview filling and Meta error translation.
+- `src/lib/wa-template-policy.test.ts` — each rule with a failing and a passing example (naming a service vs. assuming a condition, look-alike link hosts, promotion inside a utility template), warnings that do not block, and similarity thresholds for real vs. cosmetic rewrites.
+- `src/lib/wa-template-rotation.test.ts` — opt-out, cool-down with retry date, utility exempt from the cool-down, unseen-first then least-recent, unhealthy variants excluded, determinism and even spread.
+- `src/lib/wa-template-sync.test.ts` — empty account, idempotence against reordered buttons and whitespace, drift with versioned names, category drift, linter-blocked creates, orphans, same name in another language.
 - `src/lib/wa-send-guard.test.ts` — quality gate, daily cap and next-morning postponement (DST-aware), opt-out stripping by phone and BSUID, template health blocking.
 - `src/lib/wa-meta-events.test.ts` — parsing of preference and template webhooks, opt-out rows, alert dedupe.
 - `src/lib/wa-outreach.test.ts` — template rotation (least-used version, filtering out non-approved / inactive / RED / unsupported templates, step- and remaining-session-specific versions) and component building with first-name fallback.
